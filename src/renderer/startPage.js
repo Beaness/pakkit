@@ -7,6 +7,15 @@ let listenPort
 let platform
 let version
 let onlineMode
+const listenPortInput = document.getElementById('listen-port')
+const listenPortPreview = document.getElementById('listen-port-preview')
+
+function updateListenPortPreview () {
+  const fallbackPort = document.getElementById('platform').value === 'bedrock' ? '19142' : '25566'
+  listenPortPreview.textContent = listenPortInput.value || fallbackPort
+}
+
+listenPortInput.addEventListener('input', updateListenPortPreview)
 
 loadSetting('lastPlatform', 'platform', 'platform', 'java')
 let lastPlatform = platform
@@ -62,10 +71,11 @@ function platformChange () {
   } else {
     document.getElementById('version').style.display = 'block'
     document.getElementById('version-bedrock').style.display = 'none'
-    document.getElementById('auth-row').style.display = 'block'
+    document.getElementById('auth-row').style.display = 'flex'
   }
   loadSettings(platform)
   lastPlatform = platform
+  updateListenPortPreview()
 }
 
 function startProxy (event) {
@@ -74,6 +84,8 @@ function startProxy (event) {
   }
   isLoading = true
   event.preventDefault()
+  document.getElementById('start').disabled = true
+  document.getElementById('start-label').textContent = 'Starting proxy…'
   updateVars()
   saveSettings(platform)
   // If blank use default

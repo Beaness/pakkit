@@ -13,26 +13,35 @@ let currentPacket
 let currentPacketType
 
 const filterInput = document.getElementById('filter')
+const packetContainer = document.getElementById('packetcontainer')
 
 const hiddenPacketsCounter = document.getElementById('hiddenPackets')
+const showAllPacketsButton = document.getElementById('showAllPacketsButton')
+const packetCount = document.getElementById('packetCount')
+const copySelectedPacketButton = document.getElementById('copySelectedPacketButton')
 
 // Should improve performance by excluding hidden packets
 function wrappedClusterizeUpdate (htmlArray) {
-  sharedVars.hiddenPacketsAmount = 0
+  sharedVars.hiddenPacketsAmount = sharedVars.allPackets.reduce((total, packet) => {
+    const hiddenByType = sharedVars.hiddenPackets[packet.direction]?.includes(packet.meta.name)
+    return total + (hiddenByType ? 1 : 0)
+  }, 0)
   const newArray = []
   for (const item of htmlArray) {
     // If the packet is hidden
     if (item[0].match(/<li .* class=".*filter-hidden.*">/)) {
-      sharedVars.hiddenPacketsAmount += 1
+      continue
     } else {
       newArray.push(item)
     }
   }
   clusterize.update(newArray)
-  hiddenPacketsCounter.innerHTML = sharedVars.hiddenPacketsAmount + ' hidden packets';
-  if (sharedVars.hiddenPacketsAmount != 0) {
-    hiddenPacketsCounter.innerHTML += ' (<a href="#" onclick="showAllPackets()">show all</a>)'
-  }
+  const packetTotal = sharedVars.allPackets.length
+  packetCount.textContent = `${packetTotal.toLocaleString()} ${packetTotal === 1 ? 'packet' : 'packets'}`
+  packetCount.setAttribute('aria-label', `${packetTotal} captured packets`)
+  hiddenPacketsCounter.textContent = sharedVars.hiddenPacketsAmount + ' hidden packets'
+  hiddenPacketsCounter.classList.toggle('visible', sharedVars.hiddenPacketsAmount !== 0)
+  showAllPacketsButton.hidden = sharedVars.hiddenPacketsAmount === 0
 }
 
 // Cleaned up from https://css-tricks.com/indeterminate-checkboxes/
@@ -157,7 +166,7 @@ function findDefault (setting) {
 
 // TODO: saving and loading custom presets
 function findPreset (elem) {
-  const name = elem.innerText.match(/Preset: ([\w|\s]+)/i)[1].replace(/\s/g, '_')
+  const name = elem.dataset.preset
   defaultsJson.extended_presets.forEach((value) => {
     if (value.hasOwnProperty(name)) {
       // Copy the object
@@ -172,8 +181,10 @@ function findPreset (elem) {
 defaultsJson.extended_presets.forEach((value) => {
   const e = document.createElement('button')
   e.setAttribute('onclick', 'findPreset(this); updateFilteringTab()')
-  e.setAttribute('style', 'margin-left: 8px;');
-  e.innerText = `Preset: ${Object.keys(value)[0].replace(/_/g, ' ')}`;
+  e.className = 'filter-chip'
+  e.type = 'button'
+  e.dataset.preset = Object.keys(value)[0]
+  e.innerText = Object.keys(value)[0].replace(/_/g, ' ')
   document.getElementById('extendedPresets').appendChild(e)
 })
 
@@ -228,6 +239,7 @@ sharedVars.settings.setup(sharedVars)
 // TODO: move to own file
 const filteringPackets = document.getElementById('filtering-packets')
 const filteringPacketSearch = document.getElementById('filtering-packet-search')
+const filteringAutoEmpty = document.getElementById('filtering-auto-empty')
 
 function updateFilteringPacketSearch () {
   const search = filteringPacketSearch.value.trim().toLowerCase()
@@ -312,6 +324,15 @@ function updateFilteringPackets () {
   allServerboundPackets.length = 0
   allClientboundPackets.length = 0
 
+  const waitingForAutomaticVersion = sharedVars.proxyCapabilities.versionId === 'java-node-minecraft-protocol-auto'
+  filteringAutoEmpty.hidden = !waitingForAutomaticVersion
+  filteringPackets.hidden = waitingForAutomaticVersion
+  document.querySelectorAll('#Filtering button, #filtering-packet-search').forEach((element) => {
+    element.disabled = waitingForAutomaticVersion
+  })
+
+  if (waitingForAutomaticVersion) return
+
   function addPacketsToFiltering (packetsObject, direction, appendTo) {
     console.log('packets', packetsObject)
     for (const key in packetsObject) {
@@ -341,6 +362,18 @@ window.updateFilteringPackets = updateFilteringPackets
 
 window.updateFilteringPackets()
 
+// Clusterize can replace a row between pointer-down and click while packets are
+// arriving. Select from the stable container on pointer-down so a single press
+// is reliable even while the list is autoscrolling.
+packetContainer.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return
+
+  const packetElement = event.target.closest('.packet[data-packet-id]')
+  if (!packetElement || !packetContainer.contains(packetElement)) return
+
+  window.packetClick(Number(packetElement.dataset.packetId))
+})
+
 // Update every 0.05 seconds
 // TODO: Find a better way without updating on every packet (which causes lag)
 window.setInterval(function () {
@@ -360,7 +393,10 @@ window.setInterval(function () {
 }, 50)
 
 window.closeDialog = function () { // window. stops standardjs from complaining
-  // dialogOpen = false
+  if (window.packetEditor) {
+    window.packetEditor.toTextArea()
+    delete window.packetEditor
+  }
   document.getElementById('dialog-overlay').className = 'dialog-overlay'
   document.getElementById('dialog').innerHTML = ''
 }
@@ -372,8 +408,15 @@ window.resendEdited = function (id, newValue) {
       data: JSON.parse(newValue),
       direction: sharedVars.allPackets[id].direction
     }))
+    window.closeDialog()
   } catch (err) {
-    alert('Invalid JSON')
+    const errorMessage = document.getElementById('packetEditorError')
+    if (errorMessage) {
+      errorMessage.textContent = 'The packet data is not valid JSON. Check the highlighted structure and try again.'
+      errorMessage.hidden = false
+    } else {
+      alert('Invalid JSON')
+    }
   }
 }
 
@@ -383,23 +426,58 @@ function editAndResend (id) {
     return
   }
 
-  // dialogOpen = true
-  document.getElementById('dialog-overlay').className = 'dialog-overlay active'
-  document.getElementById('dialog').className = 'dialog'
-  document.getElementById('dialog').innerHTML =
+  const packet = sharedVars.allPackets[id]
+  const dialogOverlay = document.getElementById('dialog-overlay')
+  const dialog = document.getElementById('dialog')
+  dialogOverlay.className = 'dialog-overlay active'
+  dialog.className = 'dialog packet-editor-dialog'
+  dialog.innerHTML = `
+    <header class="dialog-header">
+      <div>
+        <p class="eyebrow">Edit packet</p>
+        <div class="dialog-title-row">
+          <h2 id="packetEditorTitle"></h2>
+          <span class="direction-badge" id="packetEditorDirection"></span>
+        </div>
+        <p class="dialog-description">Change the JSON data, then send a new copy in the same direction.</p>
+      </div>
+      <button aria-label="Close editor" class="button-quiet icon-button dialog-close" id="packetEditorClose" title="Close" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="packet-editor-frame"><textarea id="packetEditor"></textarea></div>
+    <footer class="dialog-footer">
+      <p class="packet-editor-error" hidden id="packetEditorError" role="alert"></p>
+      <div class="button-group">
+        <button class="button-quiet" id="packetEditorCancel" type="button">Cancel</button>
+        <button class="primary-button" id="packetEditorSend" type="button">Send packet</button>
+      </div>
+    </footer>`
 
-   `<h2>Edit and resend packet</h2>
-    <textarea id="packetEditor"></textarea>
-    <button style="margin-top: 16px;" onclick="resendEdited(${id}, packetEditor.getValue())">Send</button>
-    <button style="margin-top: 16px;" class="bottom-button" onclick="closeDialog()">Close</button>`
-
-  document.getElementById('packetEditor').value = JSON.stringify(sharedVars.allPackets[id].data, null, 2)
+  document.getElementById('packetEditorTitle').textContent = packet.meta.name
+  const directionBadge = document.getElementById('packetEditorDirection')
+  directionBadge.textContent = packet.direction
+  directionBadge.classList.add(packet.direction)
+  document.getElementById('packetEditor').value = JSON.stringify(packet.data, null, 2)
 
   window.packetEditor = CodeMirror.fromTextArea(document.getElementById('packetEditor'), { // window. stops standardjs from complaining
-    lineNumbers: false,
+    lineNumbers: true,
     autoCloseBrackets: true,
-    theme: 'darcula'
+    mode: { name: 'javascript', json: true },
+    indentUnit: 2,
+    tabSize: 2,
+    theme: 'darcula',
+    extraKeys: {
+      'Ctrl-Enter': () => window.resendEdited(id, window.packetEditor.getValue()),
+      'Cmd-Enter': () => window.resendEdited(id, window.packetEditor.getValue())
+    }
   })
+  document.getElementById('packetEditorClose').addEventListener('click', window.closeDialog)
+  document.getElementById('packetEditorCancel').addEventListener('click', window.closeDialog)
+  document.getElementById('packetEditorSend').addEventListener('click', () => {
+    window.resendEdited(id, window.packetEditor.getValue())
+  })
+  window.packetEditor.focus()
 }
 
 function errorDialog (header, info, fatal) {
@@ -460,11 +538,12 @@ sharedVars.ipcRenderer.on('editAndResend', (event, arg) => {
 
 function deselectPacket () {
   closeDataFind()
-  if (currentPacket) {
+  if (currentPacket !== undefined) {
     removeOrAddSelection(currentPacket, false)
   }
   currentPacket = undefined
   currentPacketType = undefined
+  document.getElementById('selectedPacketName').textContent = 'Packet details'
   sharedVars.packetDom.getTreeElement().firstElementChild.innerHTML = 'No packet selected!'
   document.body.classList.remove('packetSelected')
   document.body.classList.add('noPacketSelected')
@@ -486,11 +565,14 @@ window.clearPackets = function () { // window. stops standardjs from complaining
 }
 
 window.showAllPackets = function () { // window. stops standardjs from complaining
+  filterInput.value = ''
+  sharedVars.lastFilter = ''
   sharedVars.hiddenPackets = {
     serverbound: [], clientbound: []
   }
   updateFilteringTab()
 }
+showAllPacketsButton.addEventListener('click', window.showAllPackets)
 
 const hexViewer = document.getElementById('hex-viewer')
 const hexButton = document.getElementById('hex-button')
@@ -558,6 +640,7 @@ function isApolloPacket (packet) {
 function loadApolloTree (data) {
   apolloTree.loadData(data)
   apolloTree.expand()
+  if (!dataFind.hidden && apolloViewerActive) updateDataFindResults()
 }
 
 async function decodeApolloPacket (packetId) {
@@ -617,10 +700,16 @@ function openApolloView (event) {
   renderCurrentPacketInApolloViewer()
 }
 
-function isDataViewActive () {
-  return sharedVars.proxyCapabilities.jsonData &&
-    currentPacket !== undefined &&
-    document.getElementById('tree').style.display !== 'none'
+function getActiveDataFindTree () {
+  if (currentPacket === undefined) return
+
+  if (apolloViewerActive && isApolloPacket(sharedVars.allPackets[currentPacket])) {
+    return apolloTree
+  }
+
+  if (!hexViewerActive && !apolloViewerActive && sharedVars.proxyCapabilities.jsonData) {
+    return sharedVars.packetDom.getTree()
+  }
 }
 
 function collectDataFindMatches (value, query, path = [], matches = []) {
@@ -644,7 +733,7 @@ function collectDataFindMatches (value, query, path = [], matches = []) {
 }
 
 function getDataFindNode (path) {
-  let node = sharedVars.packetDom.getTree().rootNode
+  let node = getActiveDataFindTree()?.rootNode
 
   for (const label of path) {
     if (!node || !node.isComplex) return
@@ -685,7 +774,12 @@ function updateDataFindResults () {
     return
   }
 
-  const tree = sharedVars.packetDom.getTree()
+  const tree = getActiveDataFindTree()
+  if (!tree) {
+    dataFindMatches = []
+    showDataFindMatch(-1)
+    return
+  }
   dataFindMatches = collectDataFindMatches(tree.sourceJSONObj, query)
   showDataFindMatch(0)
 }
@@ -696,7 +790,7 @@ function scheduleDataFindUpdate () {
 }
 
 function openDataFind () {
-  if (!isDataViewActive()) return
+  if (!getActiveDataFindTree()) return
 
   dataFind.hidden = false
   dataFindInput.focus()
@@ -724,9 +818,24 @@ document.getElementById('data-find-previous').addEventListener('click', () => sh
 document.getElementById('data-find-next').addEventListener('click', () => showDataFindMatch(dataFindMatchIndex + 1))
 document.getElementById('data-find-close').addEventListener('click', closeDataFind)
 document.addEventListener('keydown', (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && isDataViewActive()) {
+  const packetsViewActive = document.querySelector('.tablinks-topmenu.active')?.getAttribute('aria-controls') === 'Packets'
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && packetsViewActive && getActiveDataFindTree()) {
     event.preventDefault()
     openDataFind()
+    return
+  }
+
+  const isTyping = event.target instanceof HTMLInputElement ||
+    event.target instanceof HTMLTextAreaElement || event.target.isContentEditable
+
+  if (event.key === '/' && !isTyping && packetsViewActive) {
+    event.preventDefault()
+    filterInput.focus()
+    filterInput.select()
+  } else if (event.key === 'Escape' && document.activeElement === filterInput && filterInput.value) {
+    filterInput.value = ''
+    updateFilterBox()
   }
 })
 
@@ -752,12 +861,14 @@ window.packetClick = function (id) { // window. stops standardjs from complainin
 
   currentPacket = id
   const packet = sharedVars.allPackets[id]
+  copySelectedPacketButton.disabled = packet.data === undefined
   const apolloPacket = isApolloPacket(packet)
   apolloButton.hidden = !apolloPacket
   apolloDecodeRequest++
   if (!apolloPacket && apolloViewerActive) openDataView({ currentTarget: dataButton })
   // const element = document.getElementById('packet' + id)
   currentPacketType = sharedVars.allPackets[id].name
+  document.getElementById('selectedPacketName').textContent = packet.meta.name
   removeOrAddSelection(currentPacket, true)
   document.body.classList.remove('noPacketSelected')
   document.body.classList.add('packetSelected')
@@ -808,6 +919,25 @@ function hideAll (id) {
   updateFilteringStorage()
 }
 
+function copySelectedPacket () {
+  if (currentPacket === undefined) return
+
+  let data = sharedVars.allPackets[currentPacket].data
+  if (data === undefined) return
+  data = sharedVars.proxyCapabilities.jsonData ? JSON.stringify(data, null, 2) : data.data
+  sharedVars.ipcRenderer.send('copyToClipboard', data)
+}
+
+function editSelectedPacket () {
+  if (currentPacket === undefined) return
+  editAndResend(currentPacket)
+}
+
+function hideSelectedPacketType () {
+  if (currentPacket === undefined) return
+  hideAll(currentPacket)
+}
+
 sharedVars.ipcRenderer.on('hideAllOfType', (event, arg) => { // Context menu
   const ipcMessage = JSON.parse(arg)
   hideAll(ipcMessage.id)
@@ -823,9 +953,15 @@ window.openMenu = function (evt, MenuName, id) { // window. stops standardjs fro
   tablinks = document.getElementsByClassName('tablinks' + id)
   for (i = 0; i < tablinks.length; i++) {
     tablinks[i].className = tablinks[i].className.replace(' active', '')
+    tablinks[i].setAttribute('aria-selected', 'false')
   }
   document.getElementById(MenuName).style.display = 'block'
   evt.currentTarget.className += ' active'
+  evt.currentTarget.setAttribute('aria-selected', 'true')
+
+  if (id === '-topmenu') {
+    document.querySelector('.container').inert = MenuName !== 'Packets'
+  }
 }
 
 document.body.addEventListener('contextmenu', (event) => {
@@ -905,6 +1041,9 @@ window.findDefault = findDefault
 window.findPreset = findPreset
 window.editAndResend = editAndResend
 window.hideAll = hideAll
+window.copySelectedPacket = copySelectedPacket
+window.editSelectedPacket = editSelectedPacket
+window.hideSelectedPacketType = hideSelectedPacketType
 window.saveLog = saveLog
 window.loadLog = loadLog
 window.saveScript = saveScript

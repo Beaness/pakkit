@@ -157,7 +157,7 @@ function makeMenu (direction, text, id, invalid, noData, apollo) {
 function createWindow () {
   // Create the browser window.
   const win = new BrowserWindow({
-    height: store.get('authConsentGiven') ? 550 : 650,
+    height: 720,
     width: 480,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

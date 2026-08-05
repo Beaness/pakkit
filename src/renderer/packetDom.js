@@ -42,12 +42,13 @@ function formatTime (ms) {
 }
 
 export function addPacketToDOM (packet) {
+  const hiddenByType = sharedVars.hiddenPackets[packet.direction]?.includes(packet.meta.name)
   const isHidden = packetFilteredByFilterBox(packet, sharedVars.lastFilter, sharedVars.hiddenPackets,
     // TODO: cache these?
     sharedVars.settings.getSetting('inverseFiltering'), sharedVars.settings.getSetting('regexFilter'),
     sharedVars)
   sharedVars.allPacketsHTML.push([
-    `<li id="packet${packet.uid}" onclick="packetClick(${packet.uid})" class="packet ${packet.direction} ${isHidden ? 'filter-hidden' : 'filter-shown'} ${packet.packetValid ? '' : 'invalid'}">
+    `<li id="packet${packet.uid}" data-packet-id="${packet.uid}" class="packet ${packet.direction} ${isHidden ? 'filter-hidden' : 'filter-shown'} ${packet.packetValid ? '' : 'invalid'}">
         <div class="main-data">
           <span class="id">${escapeHtml(packet.hexIdString)}</span>
           <span class="name">${escapeHtml(packet.meta.name)}</span>
@@ -55,9 +56,10 @@ export function addPacketToDOM (packet) {
         </div>
         <span class="time">${escapeHtml(formatTime(packet.time))}</span>
       </li>`])
-  if (isHidden) {
+  if (hiddenByType) {
     sharedVars.hiddenPacketsAmount += 1
-  } else {
+  }
+  if (!isHidden) {
     sharedVars.packetsUpdated = true
   }
   updateHidden()
@@ -68,10 +70,14 @@ function refreshPackets () {
 }
 
 function updateHidden () {
-  document.getElementById('hiddenPackets').innerHTML = sharedVars.hiddenPacketsAmount + ' hidden packets'
-  if (sharedVars.hiddenPacketsAmount !== 0) {
-    document.getElementById('hiddenPackets').innerHTML += ' (<a href="#" onclick="showAllPackets()">show all</a>)'
-  }
+  const hiddenPackets = document.getElementById('hiddenPackets')
+  hiddenPackets.textContent = sharedVars.hiddenPacketsAmount + ' hidden packets'
+  hiddenPackets.classList.toggle('visible', sharedVars.hiddenPacketsAmount !== 0)
+  document.getElementById('showAllPacketsButton').hidden = sharedVars.hiddenPacketsAmount === 0
+  const packetCount = document.getElementById('packetCount')
+  const packetTotal = sharedVars.allPackets.length
+  packetCount.textContent = `${packetTotal.toLocaleString()} ${packetTotal === 1 ? 'packet' : 'packets'}`
+  packetCount.setAttribute('aria-label', `${packetTotal} captured packets`)
 }
 
 export function setup (passedSharedVars) {

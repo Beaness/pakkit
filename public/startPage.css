@@ -1,44 +1,164 @@
-body {
-    margin: 0.25em 1em;
+html {
+  min-height: 100%;
 }
 
-h1.title {
-    font-family: "Lucida Console", Monaco, monospace;
+body.start-page {
+  background: var(--bg);
+  min-height: 100vh;
+  overflow-y: auto;
+  padding: 21px 24px 24px;
 }
 
-.form-wrapper {
-    list-style-type: none;
-    padding: 0;
+.setup-shell {
+  margin: 0 auto;
+  max-width: 560px;
 }
 
-.form-row {
-    display: flex;
-    justify-content: flex-start;
-    padding: .25em 0;
+.setup-brand {
+  align-items: center;
+  display: flex;
+  gap: 15px;
+  margin: 0 4px 15px;
 }
 
-.form-row.topspacer {
-    padding-top: 1em;
+.setup-brand .app-mark {
+  margin: 5px;
 }
 
-.form-row > label {
-    padding: .5em 1em .5em 0;
-    flex: 1;
+.setup-brand h1 {
+  font-size: 20px;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin: 0 0 3px;
 }
 
-.form-row > input, .form-row > select, .form-row > p, .form-row > span {
-    flex: 2;
+.setup-brand p {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0;
 }
 
-.form-row > span {
-    padding: .5em 0;
+.setup-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 20px 23px;
 }
 
-.form-row > span.start {
-    flex: auto;
+.setup-heading {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 15px;
+  padding-bottom: 14px;
 }
 
-input#start {
-    max-width: 200px;
-    width: 100%;
+.setup-heading h2 {
+  font-size: 21px;
+  letter-spacing: -0.025em;
+  margin: 0 0 5px;
+}
+
+.setup-heading > p:last-child {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field > span,
+.option-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.field input,
+.field select {
+  height: 39px;
+  min-width: 0;
+  width: 100%;
+}
+
+.field small,
+.option-row small {
+  color: var(--text-subtle);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.field small strong {
+  color: var(--text-muted);
+  font-weight: 600;
+  user-select: text;
+}
+
+.option-row {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 12px 13px;
+}
+
+.option-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.start-button {
+  height: 42px;
+  justify-content: space-between;
+  margin-top: 2px;
+  padding: 9px 13px 9px 15px;
+  width: 100%;
+}
+
+.start-button svg {
+  height: 18px;
+  width: 18px;
+}
+
+.start-button:disabled svg {
+  animation: loading-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes loading-pulse {
+  from { opacity: 0.25; transform: translateX(-3px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 420px) {
+  body.start-page {
+    padding: 18px 14px 22px;
+  }
+
+  .setup-card {
+    padding: 18px;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
 }

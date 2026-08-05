@@ -1,6 +1,6 @@
 import settingsJson from './settings.json'
 
-const settingsElement = document.getElementById('Settings')
+const settingsElement = document.getElementById('settings-list')
 
 let sharedVars
 
@@ -55,33 +55,28 @@ function createToggle (settingId) {
 export function setup (passedSharedVars) {
   sharedVars = passedSharedVars
 
-  // Add line break
-  settingsElement.appendChild(document.createElement('br'))
-
   for (const settingId in settingsJson) {
     if (!settingsJson.hasOwnProperty(settingId)) continue
 
     const setting = settingsJson[settingId]
 
-    const element = document.createElement('div')
+    const element = document.createElement('section')
     element.id = settingId
+    element.className = 'setting-card'
 
-    const nameElement = document.createElement('span')
+    const textElement = document.createElement('div')
+    textElement.className = 'setting-copy'
+
+    const nameElement = document.createElement('h2')
     nameElement.textContent = setting.name
     nameElement.className = 'settingName'
-    element.appendChild(nameElement)
+    textElement.appendChild(nameElement)
 
-    // Add line break
-    element.appendChild(document.createElement('br'))
-
-    const descriptionElement = document.createElement('span')
+    const descriptionElement = document.createElement('p')
     descriptionElement.textContent = setting.description
     descriptionElement.className = 'settingDescription'
-    element.appendChild(descriptionElement)
-
-    // Add line breaks
-    element.appendChild(document.createElement('br'))
-    element.appendChild(document.createElement('br'))
+    textElement.appendChild(descriptionElement)
+    element.appendChild(textElement)
 
     switch (setting.type) {
       case 'boolean':
@@ -92,10 +87,6 @@ export function setup (passedSharedVars) {
     }
 
     settingsElement.appendChild(element)
-
-    // Add line breaks
-    settingsElement.appendChild(document.createElement('br'))
-    settingsElement.appendChild(document.createElement('br'))
 
     // Call change function
     if (changeFunctions[settingId]) {
