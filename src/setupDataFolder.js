@@ -1,14 +1,14 @@
-const fs = require('fs')
-const md5File = require('md5-file')
+import fs from 'node:fs'
+import md5File from 'md5-file'
 
 function copyIfNotMatches (src, dest) {
   if (!fs.existsSync(dest)) {
     fs.copyFileSync(src, dest)
   } else {
     const packagedHash = md5File.sync(src)
-    console.log('The MD5 hash of the packaged', src.split('/')[src.split('/').length - 1], 'is', packagedHash)
+    console.log('The MD5 hash of the packaged', src.split(/[\\/]/)[src.split(/[\\/]/).length - 1], 'is', packagedHash)
     const savedHash = md5File.sync(dest)
-    console.log('The MD5 hash of the saved', src.split('/')[src.split('/').length - 1], 'is', savedHash)
+    console.log('The MD5 hash of the saved', src.split(/[\\/]/)[src.split(/[\\/]/).length - 1], 'is', savedHash)
     if (packagedHash === savedHash) {
       console.log('Match! Not copying.')
     } else {
@@ -18,7 +18,7 @@ function copyIfNotMatches (src, dest) {
   }
 }
 
-exports.setup = function (osDataFolder, resourcesPath) {
+export function setup (osDataFolder, sourceJarPath) {
   const dataFolder = osDataFolder + '/pakkit'
   if (!fs.existsSync(dataFolder)) {
     fs.mkdirSync(dataFolder)
@@ -28,7 +28,7 @@ exports.setup = function (osDataFolder, resourcesPath) {
     fs.mkdirSync(dataFolder + '/proxypass')
   }
 
-  copyIfNotMatches(resourcesPath + 'data/proxypass-pakkit.jar', dataFolder + '/proxypass/proxypass-pakkit.jar')
+  copyIfNotMatches(sourceJarPath, dataFolder + '/proxypass/proxypass-pakkit.jar')
 
   return dataFolder
 }

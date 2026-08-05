@@ -1,0 +1,199 @@
+/* octets per line */
+@columns: 12;
+/* octets per group (groups are separated by whitespace) */
+@group_size: 12;
+@box_side_padding: .5ch;
+@box_topbot_padding: .2em;
+/* max width of line number information (including colon and space) */
+@max_lineno_len: 9;
+
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+body {
+    text-align: center;
+}
+
+#page {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+
+    .hex-viewer {
+        flex: 1;
+    }
+    .controls {
+    }
+}
+
+.hex-viewer {
+    margin: auto;
+    display: flex;
+    width: 100%;
+
+    .bits-n-bytes, .annotations {
+        min-height: (16em * (1 + @box_topbot_padding * 2) + 1em);
+    }
+    .hexasc, .annotations {
+        /* overflow-y: scroll; */
+        /* 16 visible lines (+1 for border) */
+        display: inline-block;
+        margin: 0;
+        vertical-align: top;
+    }
+
+    /* positioning */
+    .bits-n-bytes {
+        display: flex;
+        flex-direction: column;
+        text-align: center;
+
+        /* should occupy remaining space after removing bits */
+        .hexasc {
+            flex: 1;
+        }
+        .bits {
+            margin: auto;
+        }
+    }
+
+    .hex, .asc, .annotations {
+        display: inline-block;
+        border: 1px solid #ccc;
+        vertical-align: top;
+        text-align: left;
+    }
+
+    // 1 2 3 4   5 6 7
+    // @inter_group_spacing: ceil(@columns / @group_size) - 1ch;
+    @inter_group_spacing : 2;
+    .hex .line {
+        /* for every column, account for line no, two hex digits, left+right
+         * padding and group padding */
+        width: (@max_lineno_len + @columns * (2 + 2 * @box_side_padding) +
+                @inter_group_spacing);
+
+        /* line number */
+        &::before {
+            content: attr(data-line-no) ": ";
+            white-space: pre;
+            width: (@max_lineno_len * 1ch);
+            display: inline-block;
+            text-align: right;
+        }
+    }
+    .asc {
+        width: (@columns + @inter_group_spacing);
+    }
+    .annotations {
+        min-width: 20ch;
+        margin-left: 1ch;
+        flex: 1;
+    }
+    .hex, .asc {
+        font-family: monospace;
+        font-size: larger;
+    }
+
+    /* hex / ascii boxes */
+    .hex .line span {
+        padding: @box_topbot_padding @box_side_padding;
+        margin: 0;
+        display: inline-block;
+        text-transform: uppercase;
+    }
+    .asc span {
+        padding: @box_topbot_padding 0;
+        margin: 0;
+        display: inline-block;
+        white-space: pre;
+    }
+    .hex span, .asc span {
+        /* plus 1 to add it before the start of the second and later group */
+        @group_size_plus_1: @group_size + 1;
+        &:nth-child(@{group_size}n + @{group_size_plus_1}) {
+            margin-left: 1ch;
+        }
+    }
+    .hex span, .asc span {
+        &:hover, &.hover, &.selected {
+            font-weight: bold;
+        }
+    }
+
+    /* slices of bits */
+    .bits {
+        font-family: monospace;
+        font-size: larger;
+        border: 1px solid #ccc;
+        padding: .5em 1ch;
+        overflow: auto;
+        white-space: pre-wrap;
+        text-align: left;
+
+        /* ignore padding for width */
+        -moz-box-sizing: box-model;
+        box-sizing: box-model;
+        /* at most 8 octets on a row, padding */
+        width: (8ch * (8 + 1) + 2);
+
+        /* do not show ugly empty borders */
+        &:empty {
+            display: none;
+        }
+
+        /* separate bytes */
+        span:nth-child(8n + 8):after {
+            content: ' ';
+        }
+        /* add extra padding after the fourth byte on a line */
+        span:nth-child(64n + 32):after {
+            content: '  ';
+        }
+        span {
+            color: #999;
+        }
+        span.odd, span.even {
+            font-weight: bold;
+        }
+        span.odd {
+            color: #d4a;
+        }
+        span.even {
+            color: #0a7;
+        }
+    }
+
+    /* annotations */
+    .annotations .line {
+        &:before {
+            font-size: smaller;
+            content: attr(data-byte-start) " (" attr(data-offset) ", " attr(data-length) "): ";
+            color: #999;
+        }
+    }
+    .hex span, .asc span,
+    .annotations .line {
+        &.hover-before {
+            background: #fcc;
+        }
+        &.hover-after {
+            background: #cfc;
+        }
+        &:hover, &.hover {
+            background: #ffc;
+            outline: 1px solid #fc0;
+        }
+        &.selected {
+            background: #ff9;
+            outline: 1px solid #f60;
+        }
+        &.partial {
+            color: red;
+        }
+    }
+}
+
+/* vim: set sw=4 et ts=4: */

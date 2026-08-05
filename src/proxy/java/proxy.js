@@ -1,7 +1,10 @@
 // Modified from https://github.com/PrismarineJS/node-minecraft-protocol/blob/master/examples/proxy/proxy.js
 
-const mc = require('minecraft-protocol')
-const minecraftFolder = require('minecraft-folder-path')
+import net from 'node:net'
+import mc from 'minecraft-protocol'
+import minecraftFolder from 'minecraft-folder-path'
+import minecraftData from 'minecraft-data'
+import bufferEqual from 'buffer-equal'
 
 const states = mc.states
 
@@ -15,52 +18,63 @@ let scriptingEnabled = false
 
 // https://gist.github.com/timoxley/1689041
 function isPortTaken (port, fn) {
-  const net = require('net')
   const tester = net.createServer()
     .once('error', function (err) {
       if (err.code != 'EADDRINUSE') return fn(err)
       fn(null, true)
     })
-    .once('listening', function() {
-      tester.once('close', function() { fn(null, false) })
+    .once('listening', function () {
+      tester.once('close', function () { fn(null, false) })
         .close()
     })
     .listen(port)
 }
 
-exports.capabilities = {
+export const capabilities = {
   modifyPackets: true,
   jsonData: true,
   rawData: true,
   scriptingSupport: true,
   clientboundPackets: [],
   serverboundPackets: [],
-  // TODO: Only for latest, or fetch older pages
-  wikiVgPage: 'https://wiki.vg/Protocol',
   versionId: undefined
 }
 
 let authWindowOpen = false
 
-exports.startProxy = function (host, port, listenPort, version, onlineMode, authConsent, callback, messageCallback, dataFolder,
-                               updateFilteringCallback, authCodeCallback) {
-  storedCallback = callback
-  authConsent = false
+function configureVersion (version) {
+  const mcdata = minecraftData(version)
+  if (!mcdata) {
+    throw new Error('Unsupported Minecraft protocol version: ' + version)
+  }
+
+  const resolvedVersion = mcdata.version.minecraftVersion
 
   // . cannot be in a JSON property name with electron-store
-  exports.capabilities.versionId = 'java-node-minecraft-protocol-' + version.split('.').join('-')
-
-  const mcdata = require('minecraft-data')(version) // Used to get packets, may remove if I find a better way
+  capabilities.versionId = 'java-node-minecraft-protocol-' + resolvedVersion.split('.').join('-')
   toClientMappings = mcdata.protocol.play.toClient.types.packet[1][0].type[1].mappings
   toServerMappings = mcdata.protocol.play.toServer.types.packet[1][0].type[1].mappings
 
-  exports.capabilities.clientboundPackets = mcdata.protocol.play.toClient.types.packet[1][0].type[1].mappings
-  exports.capabilities.serverboundPackets = mcdata.protocol.play.toServer.types.packet[1][0].type[1].mappings
+  capabilities.clientboundPackets = toClientMappings
+  capabilities.serverboundPackets = toServerMappings
 
-  if (host.indexOf(':') !== -1) {
-    port = host.substring(host.indexOf(':') + 1)
-    host = host.substring(0, host.indexOf(':'))
+  return resolvedVersion
+}
+
+export function startProxy (host, port, listenPort, version, onlineMode, authConsent, callback, messageCallback, dataFolder,
+  updateFilteringCallback, authCodeCallback) {
+  storedCallback = callback
+  authConsent = false
+  const useClientVersion = version.toLowerCase() === 'auto'
+
+  if (useClientVersion) {
+    capabilities.versionId = 'java-node-minecraft-protocol-auto'
+    capabilities.clientboundPackets = []
+    capabilities.serverboundPackets = []
+  } else {
+    configureVersion(version)
   }
+
   isPortTaken(listenPort, (err, taken) => {
     // TODO: Handle errors
     console.log(err, taken)
@@ -74,12 +88,29 @@ exports.startProxy = function (host, port, listenPort, version, onlineMode, auth
     } else {
       let srv
       try {
-        srv = mc.createServer({
+        const serverOptions = {
           'online-mode': false,
           port: listenPort,
           keepAlive: false,
-          version: version
-        })
+          // minecraft-protocol reads the protocol version from each incoming
+          // handshake when the server version is false.
+          version: useClientVersion ? false : version
+        }
+        if (useClientVersion) {
+          serverOptions.beforeLogin = function (client) {
+            const mcdata = minecraftData(client.protocolVersion)
+            const resolvedVersion = configureVersion(client.protocolVersion)
+
+            // createServer initially uses its default version for this data;
+            // replace it before configuration starts with the detected
+            // client's version-specific codec.
+            serverOptions.registryCodec = mcdata.registryCodec || mcdata.loginPacket?.dimensionCodec
+
+            console.log('Detected client version', resolvedVersion, '(protocol ' + client.protocolVersion + ')')
+            updateFilteringCallback()
+          }
+        }
+        srv = mc.createServer(serverOptions)
         console.log('Proxy started (Java)!')
       } catch (err) {
         let header = 'Unable to start pakkit'
@@ -93,6 +124,7 @@ exports.startProxy = function (host, port, listenPort, version, onlineMode, auth
       }
       srv.on('login', function (client) {
         realClient = client
+        const connectionVersion = useClientVersion ? client.protocolVersion : version
         const addr = client.socket.remoteAddress
         console.log('Incoming connection', '(' + addr + ')')
         let endedClient = false
@@ -118,7 +150,7 @@ exports.startProxy = function (host, port, listenPort, version, onlineMode, auth
           port: port,
           username: client.username,
           keepAlive: false,
-          version: version,
+          version: connectionVersion,
           profilesFolder: authConsent ? minecraftFolder : dataFolder,
           auth: onlineMode ? 'microsoft' : 'offline',
           onMsaCode: function (data) {
@@ -127,7 +159,7 @@ exports.startProxy = function (host, port, listenPort, version, onlineMode, auth
             authCodeCallback(data)
           }
         }
-        let targetClient = mc.createClient(clientOptions)
+        const targetClient = mc.createClient(clientOptions)
         targetClient.on('session', function (session) {
           // Login complete - the dialog can be closed
           console.log('Login done')
@@ -191,7 +223,6 @@ exports.startProxy = function (host, port, listenPort, version, onlineMode, auth
             }
           }
         }
-        const bufferEqual = require('buffer-equal')
         targetClient.on('packet', function (data, meta, buffer, fullBuffer) {
           if (client.state !== states.PLAY || meta.state !== states.PLAY) { return }
 
@@ -268,9 +299,9 @@ exports.startProxy = function (host, port, listenPort, version, onlineMode, auth
   })
 }
 
-exports.end = function () {}
+export function end () {}
 
-exports.writeToClient = function (meta, data, noCallback) {
+export function writeToClient (meta, data, noCallback) {
   if (typeof meta === 'string') {
     meta = { name: meta }
   }
@@ -281,7 +312,7 @@ exports.writeToClient = function (meta, data, noCallback) {
   }
 }
 
-exports.writeToServer = function (meta, data, noCallback) {
+export function writeToServer (meta, data, noCallback) {
   if (typeof meta === 'string') {
     meta = { name: meta }
   }
@@ -292,6 +323,6 @@ exports.writeToServer = function (meta, data, noCallback) {
   }
 }
 
-exports.setScriptingEnabled = function (isEnabled) {
+export function setScriptingEnabled (isEnabled) {
   scriptingEnabled = isEnabled
 }

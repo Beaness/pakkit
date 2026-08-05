@@ -1,4 +1,4 @@
-exports.packetFilteredByFilterBox = function (packet, filter, hiddenPackets, inverseFiltering, regexFilter,
+export function packetFilteredByFilterBox (packet, filter, hiddenPackets, inverseFiltering, regexFilter,
   sharedVars) {
   if (hiddenPackets[packet.direction].includes(packet.meta.name)) {
     return true
@@ -16,7 +16,7 @@ exports.packetFilteredByFilterBox = function (packet, filter, hiddenPackets, inv
     } catch (err) {
       // TODO: handle
       console.error(err)
-      filter = new RegExp("")
+      filter = new RegExp('')
     }
   }
 
@@ -34,6 +34,6 @@ exports.packetFilteredByFilterBox = function (packet, filter, hiddenPackets, inv
   }
 }
 
-exports.packetCollapsed = function (packet, filter, hiddenPackets) {
+export function packetCollapsed (packet, filter, hiddenPackets) {
   return packet.meta.name === 'position'
 }

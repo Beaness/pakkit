@@ -1,0 +1,190 @@
+/* octets per line */
+/* octets per group (groups are separated by whitespace) */
+/* max width of line number information (including colon and space) */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+body {
+  text-align: center;
+}
+#page {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+#page .hex-viewer {
+  flex: 1;
+}
+.hex-viewer {
+  margin: auto;
+  display: flex;
+  width: 100%;
+  /* positioning */
+  /* hex / ascii boxes */
+  /* slices of bits */
+  /* annotations */
+}
+.hex-viewer .bits-n-bytes,
+.hex-viewer .annotations {
+  min-height: 23.4em;
+}
+.hex-viewer .hexasc,
+.hex-viewer .annotations {
+  /* overflow-y: scroll; */
+  /* 16 visible lines (+1 for border) */
+  display: inline-block;
+  margin: 0;
+  vertical-align: top;
+}
+.hex-viewer .bits-n-bytes {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  /* should occupy remaining space after removing bits */
+}
+.hex-viewer .bits-n-bytes .hexasc {
+  flex: 1;
+}
+.hex-viewer .bits-n-bytes .bits {
+  margin: auto;
+}
+.hex-viewer .hex,
+.hex-viewer .asc,
+.hex-viewer .annotations {
+  display: inline-block;
+  border: 1px solid #ccc;
+  vertical-align: top;
+  text-align: left;
+}
+.hex-viewer .hex .line {
+  /* for every column, account for line no, two hex digits, left+right
+         * padding and group padding */
+  width: 47ch;
+  /* line number */
+}
+.hex-viewer .hex .line::before {
+  content: attr(data-line-no) ": ";
+  white-space: pre;
+  width: 9ch;
+  display: inline-block;
+  text-align: right;
+}
+.hex-viewer .asc {
+  width: 14;
+}
+.hex-viewer .annotations {
+  min-width: 20ch;
+  margin-left: 1ch;
+  flex: 1;
+}
+.hex-viewer .hex,
+.hex-viewer .asc {
+  font-family: monospace;
+  font-size: larger;
+}
+.hex-viewer .hex .line span {
+  padding: 0.2em 0.5ch;
+  margin: 0;
+  display: inline-block;
+  text-transform: uppercase;
+}
+.hex-viewer .asc span {
+  padding: 0.2em 0;
+  margin: 0;
+  display: inline-block;
+  white-space: pre;
+}
+.hex-viewer .hex span,
+.hex-viewer .asc span {
+  /* plus 1 to add it before the start of the second and later group */
+}
+.hex-viewer .hex span:nth-child(12n + 13),
+.hex-viewer .asc span:nth-child(12n + 13) {
+  margin-left: 1ch;
+}
+.hex-viewer .hex span:hover,
+.hex-viewer .asc span:hover,
+.hex-viewer .hex span.hover,
+.hex-viewer .asc span.hover,
+.hex-viewer .hex span.selected,
+.hex-viewer .asc span.selected {
+  font-weight: bold;
+}
+.hex-viewer .bits {
+  font-family: monospace;
+  font-size: larger;
+  border: 1px solid #ccc;
+  padding: 0.5em 1ch;
+  overflow: auto;
+  white-space: pre-wrap;
+  text-align: left;
+  /* ignore padding for width */
+  -moz-box-sizing: box-model;
+  box-sizing: box-model;
+  /* at most 8 octets on a row, padding */
+  width: 74ch;
+  /* do not show ugly empty borders */
+  /* separate bytes */
+  /* add extra padding after the fourth byte on a line */
+}
+.hex-viewer .bits:empty {
+  display: none;
+}
+.hex-viewer .bits span:nth-child(8n + 8):after {
+  content: ' ';
+}
+.hex-viewer .bits span:nth-child(64n + 32):after {
+  content: '  ';
+}
+.hex-viewer .bits span {
+  color: #999;
+}
+.hex-viewer .bits span.odd,
+.hex-viewer .bits span.even {
+  font-weight: bold;
+}
+.hex-viewer .bits span.odd {
+  color: #d4a;
+}
+.hex-viewer .bits span.even {
+  color: #0a7;
+}
+.hex-viewer .annotations .line:before {
+  font-size: smaller;
+  content: attr(data-byte-start) " (" attr(data-offset) ", " attr(data-length) "): ";
+  color: #999;
+}
+.hex-viewer .hex span.hover-before,
+.hex-viewer .asc span.hover-before,
+.hex-viewer .annotations .line.hover-before {
+  background: #fcc;
+}
+.hex-viewer .hex span.hover-after,
+.hex-viewer .asc span.hover-after,
+.hex-viewer .annotations .line.hover-after {
+  background: #cfc;
+}
+.hex-viewer .hex span:hover,
+.hex-viewer .asc span:hover,
+.hex-viewer .annotations .line:hover,
+.hex-viewer .hex span.hover,
+.hex-viewer .asc span.hover,
+.hex-viewer .annotations .line.hover {
+  background: #ffc;
+  outline: 1px solid #fc0;
+}
+.hex-viewer .hex span.selected,
+.hex-viewer .asc span.selected,
+.hex-viewer .annotations .line.selected {
+  background: #ff9;
+  outline: 1px solid #f60;
+}
+.hex-viewer .hex span.partial,
+.hex-viewer .asc span.partial,
+.hex-viewer .annotations .line.partial {
+  color: red;
+}
+/* vim: set sw=4 et ts=4: */

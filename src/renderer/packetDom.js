@@ -1,8 +1,8 @@
+import { packetFilteredByFilterBox } from './filteringLogic.js'
+
 let tree
 let treeElement
 let sharedVars
-
-const filteringLogic = require('./filteringLogic.js')
 
 function trimData (data) { // Function to trim the size of stringified data for previews
   if (data === undefined) {
@@ -38,11 +38,11 @@ function trimData (data) { // Function to trim the size of stringified data for 
 
 function formatTime (ms) {
   // Based on https://stackoverflow.com/a/50409993/4012708
-  return new Date(new Date(ms).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().split("T")[1].replace(/[0-9]Z$/, '');
+  return new Date(new Date(ms).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[1].replace(/[0-9]Z$/, '')
 }
 
-exports.addPacketToDOM = function (packet) {
-  const isHidden = filteringLogic.packetFilteredByFilterBox(packet, sharedVars.lastFilter, sharedVars.hiddenPackets,
+export function addPacketToDOM (packet) {
+  const isHidden = packetFilteredByFilterBox(packet, sharedVars.lastFilter, sharedVars.hiddenPackets,
     // TODO: cache these?
     sharedVars.settings.getSetting('inverseFiltering'), sharedVars.settings.getSetting('regexFilter'),
     sharedVars)
@@ -55,12 +55,6 @@ exports.addPacketToDOM = function (packet) {
         </div>
         <span class="time">${escapeHtml(formatTime(packet.time))}</span>
       </li>`])
-  /* if (!noUpdate) {/html/mainPage/index.html/html/mainPage/index.html
-    clusterize.append(sharedVars.allPacketsHTML.slice(-1)[0]);
-    if (wasScrolledToBottom) {
-      sharedVars.packetList.parentElement.scrollTop = sharedVars.packetList.parentElement.scrollHeight;
-    }
-  } */
   if (isHidden) {
     sharedVars.hiddenPacketsAmount += 1
   } else {
@@ -71,27 +65,16 @@ exports.addPacketToDOM = function (packet) {
 
 function refreshPackets () {
   // TODO: Is this needed?
-  /* const wasScrolledToBottom = (sharedVars.packetList.parentElement.scrollTop >= (sharedVars.packetList.parentElement.scrollHeight - sharedVars.packetList.parentElement.offsetHeight))
-
-  sharedVars.allPacketsHTML = []
-  sharedVars.allPackets.forEach(function (packet) {
-    // noUpdate is true as we want to manually update at the end
-    addPacketToDOM(packet, true)
-  })
-  clusterize.update(sharedVars.allPacketsHTML)
-  /if (wasScrolledToBottom) {
-    sharedVars.packetList.parentElement.scrollTop = sharedVars.packetList.parentElement.scrollHeight
-  } */
 }
 
 function updateHidden () {
-  document.getElementById("hiddenPackets").innerHTML = sharedVars.hiddenPacketsAmount + ' hidden packets';
+  document.getElementById('hiddenPackets').innerHTML = sharedVars.hiddenPacketsAmount + ' hidden packets'
   if (sharedVars.hiddenPacketsAmount !== 0) {
-     document.getElementById("hiddenPackets").innerHTML += ' (<a href="#" onclick="showAllPackets()">show all</a>)'
+    document.getElementById('hiddenPackets').innerHTML += ' (<a href="#" onclick="showAllPackets()">show all</a>)'
   }
 }
 
-exports.setup = function (passedSharedVars) {
+export function setup (passedSharedVars) {
   sharedVars = passedSharedVars
 
   treeElement = document.getElementById('tree')
@@ -100,18 +83,18 @@ exports.setup = function (passedSharedVars) {
   treeElement.firstElementChild.innerHTML = 'No packet selected!'
 }
 
-exports.addPacket = function (data) {
+export function addPacket (data) {
   sharedVars.allPackets.push(data)
   data.uid = sharedVars.allPackets.length - 1
-  exports.addPacketToDOM(data)
+  addPacketToDOM(data)
 }
 
 // TODO: use shared var
 
-exports.getTreeElement = function () {
+export function getTreeElement () {
   return treeElement
 }
 
-exports.getTree = function () {
+export function getTree () {
   return tree
 }

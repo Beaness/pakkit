@@ -1,4 +1,4 @@
-const _eval = require('node-eval')
+import _eval from 'node-eval'
 
 let mainWindow
 let ipcMain
@@ -19,7 +19,17 @@ const client = {
   }
 }
 
-exports.init = function (window, passedIpcMain, passedProxy) {
+function reportScriptError (err) {
+  const message = err && err.message ? err.message : String(err)
+  mainWindow.send('scriptStatus', JSON.stringify({
+    status: 'error',
+    message: message,
+    stack: err && err.stack ? err.stack : message
+  }))
+  console.error(err)
+}
+
+export function init (window, passedIpcMain, passedProxy) {
   mainWindow = window
   ipcMain = passedIpcMain
   proxy = passedProxy
@@ -39,23 +49,34 @@ exports.init = function (window, passedIpcMain, passedProxy) {
     proxy.setScriptingEnabled(scriptingEnabled)
     currentScript = ipcMessage.script
     // prevent that the script gets executed when scripting is disabled
-    if(scriptingEnabled) {
-      currentScriptModule = _eval(currentScript, '/script.js')
+    if (scriptingEnabled) {
+      try {
+        const evaluatedScriptModule = _eval(currentScript, '/script.js')
+        currentScriptModule = evaluatedScriptModule
+        mainWindow.send('scriptStatus', JSON.stringify({ status: 'success' }))
+      } catch (err) {
+        reportScriptError(err)
+      }
     } else {
       currentScriptModule = _eval('', '/script.js')
+      mainWindow.send('scriptStatus', JSON.stringify({ status: 'idle' }))
     }
   })
 }
 
-exports.packetHandler = function (direction, meta, data, id, raw, canUseScripting, packetValid) {
+export function packetHandler (direction, meta, data, id, raw, canUseScripting, packetValid) {
   try {
     mainWindow.send('packet', JSON.stringify({ meta: meta, data: data, direction: direction, hexIdString: id, raw: raw, time: Date.now(), packetValid: packetValid }))
     // TODO: Maybe write raw data?
     if (proxy.capabilities.scriptingSupport && canUseScripting && scriptingEnabled) {
-      if (direction === 'clientbound') {
-        currentScriptModule.downstreamHandler(meta, data, server, client)
-      } else {
-        currentScriptModule.upstreamHandler(meta, data, server, client)
+      try {
+        if (direction === 'clientbound') {
+          currentScriptModule.downstreamHandler(meta, data, server, client)
+        } else {
+          currentScriptModule.upstreamHandler(meta, data, server, client)
+        }
+      } catch (err) {
+        reportScriptError(err)
       }
     }
   } catch (err) {
@@ -63,6 +84,6 @@ exports.packetHandler = function (direction, meta, data, id, raw, canUseScriptin
   }
 }
 
-exports.messageHandler = function (header, info, fatal) {
+export function messageHandler (header, info, fatal) {
   mainWindow.send('message', JSON.stringify({ header: header, info: info, fatal: fatal }))
 }

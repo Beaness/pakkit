@@ -1,6 +1,6 @@
-const { spawn } = require('child_process')
-const WebSocket = require('ws')
-const net = require('net')
+import { spawn } from 'node:child_process'
+import WebSocket from 'ws'
+import net from 'node:net'
 
 // const java = require('java')
 
@@ -27,14 +27,13 @@ let scriptingEnabled = false
 
 // This whole thing is messy for now.
 
-exports.capabilities = {
+export const capabilities = {
   modifyPackets: true,
   jsonData: true,
   rawData: true,
   scriptingSupport: false,
   clientboundPackets: {},
   serverboundPackets: {},
-  wikiVgPage: 'https://wiki.vg/Bedrock_Protocol',
   versionId: 'bedrock-proxypass-json'
 }
 
@@ -49,10 +48,10 @@ let updateFilteringCallback
 // https://stackoverflow.com/questions/28050171/nodejs-random-free-tcp-ports
 function freePort () {
   return new Promise((resolve, reject) => {
-    const srv = net.createServer(function(sock) {
+    const srv = net.createServer(function (sock) {
       sock.end()
     })
-    srv.listen(0, function() {
+    srv.listen(0, function () {
       const port = srv.address().port
       srv.close()
       resolve(port)
@@ -63,7 +62,7 @@ function freePort () {
   })
 }
 
-async function launch() {
+async function launch () {
   wsPort = Number(await freePort())
 
   child = spawn('java', ['-jar', dataFolder + '/proxypass/' + 'proxypass-pakkit.jar', '--start-from-args', '0.0.0.0',
@@ -78,7 +77,6 @@ async function launch() {
     }, 50)
   })
 
-
   // setTimeout(startWebsocket, 3000)
 }
 
@@ -89,7 +87,7 @@ function startWebsocket () {
     ws.send('something')
   }); */
 
-  ws.on('message', function incoming(data) {
+  ws.on('message', function incoming (data) {
     // console.log(data);
     try {
       data = JSON.parse(data)
@@ -115,7 +113,7 @@ function startWebsocket () {
 function handlePacket (packet) {
   const name = packet.packetType.toLowerCase()
 
-  const data = JSON.parse(packet.jsonData);
+  const data = JSON.parse(packet.jsonData)
   const hexIdString = '0x' + packet.packetId.toString(16).padStart(2, '0')
 
   // These values are unneeded or are exposed elsewhere in the GUI
@@ -137,17 +135,17 @@ function handlePacket (packet) {
 }
 
 function handleEvent (event) {
-  switch(event.eventType) {
+  switch (event.eventType) {
     case 'unableToConnect':
       messageCallback('Unable to connect to server', 'Unable to connect to the Bedrock server at ' +
         event.eventData.replace(/^\//, '') + // Remove slash at start
         '. Make sure the server is online.')
       relaunch()
-      break;
+      break
     case 'disconnect':
       console.log('Disconnect - relaunching proxy')
       relaunch()
-      break;
+      break
     case 'filteringPackets':
       console.log('rec')
       const packetTypes = JSON.parse(event.eventData)
@@ -155,11 +153,11 @@ function handleEvent (event) {
         const idString = '0x' + Number(index).toString(16).padStart(2, '0')
         const name = packetTypes[index].toLowerCase()
         // There isn't much of a distinction between serverbound and clientbound in Bedrock and many packets can be sent both ways
-        exports.capabilities.clientboundPackets[idString] = name
-        exports.capabilities.serverboundPackets[idString] = name
+        capabilities.clientboundPackets[idString] = name
+        capabilities.serverboundPackets[idString] = name
       }
       updateFilteringCallback()
-      break;
+      break
     default:
       console.log('Unknown event', event.eventType)
   }
@@ -185,8 +183,8 @@ function handleError (chunk) {
   }
 }
 
-exports.startProxy = function (passedHost, passedPort, passedListenPort, version, onlineMode, authConsent, passedPacketCallback,
-                               passedMessageCallback, passedDataFolder, passedUpdateFilteringCallback, authCodeCallback) {
+export function startProxy (passedHost, passedPort, passedListenPort, version, onlineMode, authConsent, passedPacketCallback,
+  passedMessageCallback, passedDataFolder, passedUpdateFilteringCallback, authCodeCallback) {
   host = passedHost
   port = passedPort
   listenPort = passedListenPort
@@ -198,7 +196,7 @@ exports.startProxy = function (passedHost, passedPort, passedListenPort, version
   launch()
 }
 
-exports.end = function () {
+export function end () {
   child.kill()
 }
 
@@ -209,7 +207,7 @@ function relaunch () {
   child.kill()
 }
 
-exports.writeToClient = function (meta, data) {
+export function writeToClient (meta, data) {
   ws.send(JSON.stringify({
     type: 'inject',
     className: meta.className,
@@ -219,7 +217,7 @@ exports.writeToClient = function (meta, data) {
   // proxyPlayerSession.injectPacketStaticPromise(JSON.stringify(data), meta.className, 'client')
 }
 
-exports.writeToServer = function (meta, data) {
+export function writeToServer (meta, data) {
   // proxyPlayerSession.injectPacketStaticPromise(JSON.stringify(data), meta.className, 'server')
   ws.send(JSON.stringify({
     type: 'inject',

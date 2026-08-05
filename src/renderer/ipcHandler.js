@@ -1,6 +1,8 @@
+import { clearScriptStatus, handleError, handleScriptError, showNoErrors } from './errorHandler.js'
+
 let sharedVars
 
-exports.setup = function (passedSharedVars) {
+export function setup (passedSharedVars) {
   sharedVars = passedSharedVars
 
   sharedVars.ipcRenderer.on('copyPacketData', (event, arg) => {
@@ -26,8 +28,8 @@ exports.setup = function (passedSharedVars) {
     const ipcMessage = JSON.parse(arg)
     const data = sharedVars.allPackets[ipcMessage.id].data
 
-    let clipData = '/tp @p ' + ((datasharedVars.packetsUpdated = false.flags & 0x01) ? '~' : '') + ((data.x === 0 && (data.flags & 0x01)) ? '' : data.x) +
-      ((data.flags & 0x02) ? ' ~' : ' ') + ((data.y === 0 && (data.flags & 0x03)) ? '' : data.y) +
+    let clipData = '/tp @p ' + ((data.flags & 0x01) ? '~' : '') + ((data.x === 0 && (data.flags & 0x01)) ? '' : data.x) +
+      ((data.flags & 0x02) ? ' ~' : ' ') + ((data.y === 0 && (data.flags & 0x02)) ? '' : data.y) +
       ((data.flags & 0x04) ? ' ~' : ' ') + ((data.z === 0 && (data.flags & 0x04)) ? '' : data.z)
 
     if (!(data.flags & 0x10) || !(data.flags & 0x08) || data.pitch != 0 || data.yaw !== 0) {
@@ -48,14 +50,26 @@ exports.setup = function (passedSharedVars) {
     handleError(ipcMessage.msg, ipcMessage.stack)
   })
 
+  sharedVars.ipcRenderer.on('scriptStatus', (event, arg) => {
+    const ipcMessage = JSON.parse(arg)
+    if (ipcMessage.status === 'success') {
+      showNoErrors()
+    } else if (ipcMessage.status === 'error') {
+      handleScriptError(ipcMessage.stack || ipcMessage.message)
+    } else {
+      clearScriptStatus()
+    }
+  })
+
   sharedVars.ipcRenderer.on('message', (event, arg) => {
     const ipcMessage = JSON.parse(arg)
-    errorDialog(ipcMessage.header, ipcMessage.info, ipcMessage.fatal)
+    window.errorDialog(ipcMessage.header, ipcMessage.info, ipcMessage.fatal)
   })
 
   sharedVars.ipcRenderer.on('updateFiltering', (event, arg) => {
     console.log('update!!!')
     sharedVars.proxyCapabilities = JSON.parse(sharedVars.ipcRenderer.sendSync('proxyCapabilities', ''))
+    sharedVars.hiddenPackets = window.getVersionSpecificVar('hiddenPackets', window.findDefault('hiddenPackets'))
     window.updateFilteringPackets()
   })
 
@@ -79,9 +93,8 @@ exports.setup = function (passedSharedVars) {
     document.getElementById('btnScriptSave').title = arg
   })
 
-sharedVars.ipcRenderer.on('disableBtnScriptSave', (event, arg) => {
-  document.getElementById('btnScriptSave').disabled = true
-  document.getElementById('btnScriptSave').title = ''
-})
-
+  sharedVars.ipcRenderer.on('disableBtnScriptSave', (event, arg) => {
+    document.getElementById('btnScriptSave').disabled = true
+    document.getElementById('btnScriptSave').title = ''
+  })
 }

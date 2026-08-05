@@ -1,4 +1,4 @@
-const settingsJson = require('./settings.json')
+import settingsJson from './settings.json'
 
 const settingsElement = document.getElementById('Settings')
 
@@ -8,11 +8,11 @@ const changeFunctions = {}
 // Prevents constant file reads/writes
 const cache = {}
 
-exports.bindToSettingChange = function (settingId, f) {
+export function bindToSettingChange (settingId, f) {
   changeFunctions[settingId] = f
 }
 
-exports.getSetting = function (id) {
+export function getSetting (id) {
   if (cache[id] === undefined) {
     if (sharedVars.store.get('settings.' + id) === undefined) {
       sharedVars.store.set('settings.' + id, settingsJson[id].default)
@@ -22,7 +22,7 @@ exports.getSetting = function (id) {
   return cache[id]
 }
 
-exports.setSetting = function (settingId, value) {
+export function setSetting (settingId, value) {
   cache[settingId] = value
   sharedVars.store.set('settings.' + settingId, value)
   if (changeFunctions[settingId]) {
@@ -30,7 +30,7 @@ exports.setSetting = function (settingId, value) {
   }
 }
 
-window.setSetting = exports.setSetting
+window.setSetting = setSetting
 
 function createToggle (settingId) {
   const toggleElement = document.createElement('label')
@@ -39,10 +39,10 @@ function createToggle (settingId) {
   const input = document.createElement('input')
   input.id = settingId
   input.type = 'checkbox'
-  input.checked = exports.getSetting(settingId)
+  input.checked = getSetting(settingId)
   input.addEventListener('change', () => {
-    exports.setSetting(settingId, input.checked)
-  });
+    setSetting(settingId, input.checked)
+  })
   toggleElement.appendChild(input)
 
   const slider = document.createElement('span')
@@ -52,7 +52,7 @@ function createToggle (settingId) {
   return toggleElement
 }
 
-exports.setup = function (passedSharedVars) {
+export function setup (passedSharedVars) {
   sharedVars = passedSharedVars
 
   // Add line break
@@ -99,7 +99,7 @@ exports.setup = function (passedSharedVars) {
 
     // Call change function
     if (changeFunctions[settingId]) {
-      changeFunctions[settingId](exports.getSetting(settingId))
+      changeFunctions[settingId](getSetting(settingId))
     }
   }
 }

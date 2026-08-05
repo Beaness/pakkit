@@ -1,13 +1,13 @@
 /* global Split, jsonTree, escapeHtml, alert, CodeMirror */
 
-const Store = require('electron-store');
-
-const axios = require('axios')
-
-const Clusterize = require('clusterize.js')
-const filteringLogic = require('./js/filteringLogic.js')
-
-// const escapeHtml = require('escape-html'); Already defined in my customised version of jsonTree (I just added HTML escaping)
+import Clusterize from 'clusterize.js'
+import * as filteringLogic from './filteringLogic.js'
+import './errorHandler.js'
+import defaultsJson from './defaults.json'
+import * as scripting from './scripting.js'
+import * as packetDom from './packetDom.js'
+import * as ipcHandler from './ipcHandler.js'
+import * as settings from './settings.js'
 
 let currentPacket
 let currentPacketType
@@ -87,11 +87,11 @@ function updateFiltering () {
   }
   sharedVars.allPacketsHTML.forEach(function (item, index, array) {
     if (!filteringLogic.packetFilteredByFilterBox(sharedVars.allPackets[index],
-          regexFilter ? regex : sharedVars.lastFilter,
-          sharedVars.hiddenPackets,
-          inverseFiltering,
-          regexFilter,
-          sharedVars)) {
+        regexFilter ? regex : sharedVars.lastFilter,
+        sharedVars.hiddenPackets,
+        inverseFiltering,
+        regexFilter,
+        sharedVars)) {
       // If it's hidden, show it
       array[index] = [item[0].replace('filter-hidden', 'filter-shown')]
     } else {
@@ -109,18 +109,20 @@ const sharedVars = {
   allPackets: [],
   allPacketsHTML: [],
   proxyCapabilities: {},
-  ipcRenderer: require('electron').ipcRenderer,
+  ipcRenderer: window.ipcRenderer,
   packetList: document.getElementById('packetlist'),
   hiddenPackets: undefined,
   scripting: undefined,
   lastFilter: '',
   hiddenPacketsAmount: 0,
-  store: new Store()
+  store: window.store
 }
+
+window.sharedVars = sharedVars
 
 sharedVars.proxyCapabilities = JSON.parse(sharedVars.ipcRenderer.sendSync('proxyCapabilities', ''))
 
-function getVersionSpecificVar(name, defaultValue) {
+function getVersionSpecificVar (name, defaultValue) {
   const versionId = 'version-' + sharedVars.proxyCapabilities.versionId
   const settingsObject = sharedVars.store.get(versionId)
   if (settingsObject) {
@@ -136,16 +138,14 @@ function getVersionSpecificVar(name, defaultValue) {
   return JSON.parse(sharedVars.store.get(versionId)[name])
 }
 
-function setVersionSpecificVar(name, value) {
+function setVersionSpecificVar (name, value) {
   const versionId = 'version-' + sharedVars.proxyCapabilities.versionId
   const settingsObject = sharedVars.store.get(versionId)
   settingsObject[name] = JSON.stringify(value)
   sharedVars.store.set(versionId, settingsObject)
 }
 
-const defaultsJson = require('./js/defaults.json')
-
-function findDefault(setting) {
+function findDefault (setting) {
   const versionId = sharedVars.proxyCapabilities.versionId
   for (const key in defaultsJson) {
     const regex = new RegExp(key)
@@ -154,8 +154,9 @@ function findDefault(setting) {
     }
   }
 }
+
 // TODO: saving and loading custom presets
-function findPreset(elem) {
+function findPreset (elem) {
   const name = elem.innerText.match(/Preset: ([\w|\s]+)/i)[1].replace(/\s/g, '_')
   defaultsJson.extended_presets.forEach((value) => {
     if (value.hasOwnProperty(name)) {
@@ -171,7 +172,7 @@ function findPreset(elem) {
 defaultsJson.extended_presets.forEach((value) => {
   const e = document.createElement('button')
   e.setAttribute('onclick', 'findPreset(this); updateFilteringTab()')
-  e.setAttribute('style',  'margin-left: 8px;');
+  e.setAttribute('style', 'margin-left: 8px;');
   e.innerText = `Preset: ${Object.keys(value)[0].replace(/_/g, ' ')}`;
   document.getElementById('extendedPresets').appendChild(e)
 })
@@ -194,13 +195,13 @@ Split(['#packets', '#sidebar'], {
   minSize: [50, 75]
 })
 
-sharedVars.scripting = require('./js/scripting.js')
+sharedVars.scripting = scripting
 sharedVars.scripting.setup(sharedVars)
-sharedVars.packetDom = require('./js/packetDom.js')
+sharedVars.packetDom = packetDom
 sharedVars.packetDom.setup(sharedVars)
-sharedVars.ipcHandler = require('./js/ipcHandler.js')
+sharedVars.ipcHandler = ipcHandler
 sharedVars.ipcHandler.setup(sharedVars)
-sharedVars.settings = require('./js/settings.js')
+sharedVars.settings = settings
 sharedVars.settings.bindToSettingChange('showTimes', (newValue) => {
   if (newValue) {
     document.body.classList.remove('timeNotShown')
@@ -224,12 +225,22 @@ sharedVars.settings.bindToSettingChange('regexFilter', (newValue) => {
 })
 sharedVars.settings.setup(sharedVars)
 
-
-
-// const sidebar = document.getElementById('sidebar-box')
-
 // TODO: move to own file
 const filteringPackets = document.getElementById('filtering-packets')
+const filteringPacketSearch = document.getElementById('filtering-packet-search')
+
+function updateFilteringPacketSearch () {
+  const search = filteringPacketSearch.value.trim().toLowerCase()
+
+  for (const item of filteringPackets.children) {
+    const id = item.querySelector('.id').textContent
+    const name = item.querySelector('.name').textContent
+    const matchesSearch = `${id} ${name}`.toLowerCase().includes(search)
+    item.classList.toggle('packet-search-hidden', !matchesSearch)
+  }
+}
+
+filteringPacketSearch.addEventListener('input', updateFilteringPacketSearch)
 
 function updateFilteringStorage () {
   setVersionSpecificVar('hiddenPackets', sharedVars.hiddenPackets)
@@ -261,8 +272,46 @@ function updateFilteringTab () {
 
 const allServerboundPackets = []
 const allClientboundPackets = []
+window.allServerboundPackets = allServerboundPackets
+window.allClientboundPackets = allClientboundPackets
 
-window.updateFilteringPackets = () => {
+const scoreboardPackets = new Set([
+  'scoreboard_display_objective',
+  'scoreboard_objective',
+  'scoreboard_score',
+  'reset_score',
+  'teams',
+  'remove_objective',
+  'set_display_objective',
+  'set_score',
+  'set_scoreboard_identity'
+])
+
+function applyFilteringPreset (preset) {
+  let showPacket
+
+  if (preset === 'toClient') {
+    showPacket = (name, direction) => direction === 'clientbound'
+  } else if (preset === 'toServer') {
+    showPacket = (name, direction) => direction === 'serverbound'
+  } else if (preset === 'scoreboard') {
+    showPacket = (name) => scoreboardPackets.has(name)
+  } else {
+    return
+  }
+
+  sharedVars.hiddenPackets = {
+    serverbound: allServerboundPackets.filter((name) => !showPacket(name, 'serverbound')),
+    clientbound: allClientboundPackets.filter((name) => !showPacket(name, 'clientbound'))
+  }
+  updateFilteringTab()
+}
+
+function updateFilteringPackets () {
+  filteringPackets.innerHTML = ''
+  allServerboundPackets.length = 0
+  allClientboundPackets.length = 0
+
   function addPacketsToFiltering (packetsObject, direction, appendTo) {
     console.log('packets', packetsObject)
     for (const key in packetsObject) {
@@ -285,7 +334,10 @@ window.updateFilteringPackets = () => {
 
   addPacketsToFiltering(sharedVars.proxyCapabilities.serverboundPackets, 'serverbound', allServerboundPackets)
   addPacketsToFiltering(sharedVars.proxyCapabilities.clientboundPackets, 'clientbound', allClientboundPackets)
+  updateFilteringPacketSearch()
 }
+
+window.updateFilteringPackets = updateFilteringPackets
 
 window.updateFilteringPackets()
 
@@ -333,7 +385,7 @@ function editAndResend (id) {
 
   // dialogOpen = true
   document.getElementById('dialog-overlay').className = 'dialog-overlay active'
-  document.getElementById('dialog').className='dialog'
+  document.getElementById('dialog').className = 'dialog'
   document.getElementById('dialog').innerHTML =
 
    `<h2>Edit and resend packet</h2>
@@ -350,10 +402,10 @@ function editAndResend (id) {
   })
 }
 
-function errorDialog(header, info, fatal) {
+function errorDialog (header, info, fatal) {
   // dialogOpen = true
   document.getElementById('dialog-overlay').className = 'dialog-overlay active'
-  document.getElementById('dialog').className='dialog dialog-small error-dialog'
+  document.getElementById('dialog').className = 'dialog dialog-small error-dialog'
   document.getElementById('dialog').innerHTML =
 
  `<h2>${header}</h2>
@@ -361,8 +413,9 @@ function errorDialog(header, info, fatal) {
   <br>
   <button style="margin-top: 16px;" class="bottom-button" onclick="${fatal ? 'sharedVars.ipcRenderer.send(\'relaunchApp\', \'\')' : 'closeDialog()' }">Close</button>`
 }
+window.errorDialog = errorDialog
 
-function loginDialog(data) {
+function loginDialog (data) {
   // TODO: Take into account the other parameters
   /*
   {
@@ -375,7 +428,7 @@ function loginDialog(data) {
   }
   */
   document.getElementById('dialog-overlay').className = 'dialog-overlay active'
-  document.getElementById('dialog').className='dialog dialog-medium'
+  document.getElementById('dialog').className = 'dialog dialog-medium'
   document.getElementById('dialog').innerHTML =
  `<h2>This server is in online mode</h2>
   Please log in to your Microsoft account at the following URL:
@@ -394,7 +447,7 @@ function loginDialog(data) {
 sharedVars.ipcRenderer.on('showAuthCode', (event, arg) => {
   const ipcMessage = JSON.parse(arg)
   if (ipcMessage === 'close') {
-    closeDialog()
+    window.closeDialog()
   } else {
     loginDialog(ipcMessage)
   }
@@ -406,6 +459,7 @@ sharedVars.ipcRenderer.on('editAndResend', (event, arg) => {
 })
 
 function deselectPacket () {
+  closeDataFind()
   if (currentPacket) {
     removeOrAddSelection(currentPacket, false)
   }
@@ -415,12 +469,17 @@ function deselectPacket () {
   document.body.classList.remove('packetSelected')
   document.body.classList.add('noPacketSelected')
   hexViewer.style.display = 'none'
+  apolloButton.hidden = true
+  apolloDecodeRequest++
+  if (apolloViewerActive) openDataView({ currentTarget: dataButton })
 }
+window.deselectPacket = deselectPacket
 
 window.clearPackets = function () { // window. stops standardjs from complaining
   deselectPacket()
   sharedVars.allPackets = []
   sharedVars.allPacketsHTML = []
+  apolloResults.clear()
   sharedVars.packetsUpdated = true
   // TODO: Doesn't seem to work? When removing line above it doesn't do anything until the next packet
   wrappedClusterizeUpdate([])
@@ -434,6 +493,242 @@ window.showAllPackets = function () { // window. stops standardjs from complaini
 }
 
 const hexViewer = document.getElementById('hex-viewer')
+const hexButton = document.getElementById('hex-button')
+const dataButton = document.getElementById('data-button')
+const apolloButton = document.getElementById('apollo-button')
+const apolloElement = document.getElementById('apollo')
+const apolloTree = jsonTree.create({}, apolloElement)
+const dataFind = document.getElementById('data-find')
+const dataFindInput = document.getElementById('data-find-input')
+const dataFindCount = document.getElementById('data-find-count')
+let hexViewerActive = false
+let hexViewerLoaded = false
+let apolloViewerActive = false
+let apolloDecodeRequest = 0
+const apolloResults = new Map()
+let dataFindMatches = []
+let dataFindMatchIndex = -1
+let dataFindTimer
+
+if (!sharedVars.proxyCapabilities.rawData) {
+  hexButton.style.display = 'none'
+}
+
+function renderCurrentPacketInHexViewer () {
+  if (!hexViewerActive || !hexViewerLoaded || currentPacket === undefined) return
+
+  const packet = sharedVars.allPackets[currentPacket]
+  if (!packet || !packet.raw) return
+
+  const buf = Uint8Array.from(packet.raw)
+  hexViewer.style.display = 'block'
+  hexViewer.contentWindow.postMessage(buf.buffer, '*', [buf.buffer])
+}
+
+hexViewer.addEventListener('load', () => {
+  if (!hexViewer.getAttribute('src')) return
+
+  hexViewerLoaded = true
+  renderCurrentPacketInHexViewer()
+})
+
+function openDataView (event) {
+  hexViewerActive = false
+  apolloViewerActive = false
+  window.openMenu(event, 'tree', '-rightpanel')
+}
+
+function openHexView (event) {
+  closeDataFind()
+  hexViewerActive = true
+  apolloViewerActive = false
+  window.openMenu(event, 'hex', '-rightpanel')
+
+  if (!hexViewer.getAttribute('src')) {
+    hexViewer.src = hexViewer.dataset.src
+  } else {
+    renderCurrentPacketInHexViewer()
+  }
+}
+
+function isApolloPacket (packet) {
+  return packet?.meta?.name === 'custom_payload' && packet?.data?.channel === 'lunar:apollo'
+}
+
+function loadApolloTree (data) {
+  apolloTree.loadData(data)
+  apolloTree.expand()
+}
+
+async function decodeApolloPacket (packetId) {
+  if (apolloResults.has(packetId)) return apolloResults.get(packetId)
+
+  const packet = sharedVars.allPackets[packetId]
+  if (!isApolloPacket(packet)) throw new Error('This is not a lunar:apollo packet')
+
+  const decoded = await sharedVars.ipcRenderer.invoke('decodeApolloPayload', JSON.stringify({
+    payload: packet.data.data
+  }))
+  apolloResults.set(packetId, decoded)
+  return decoded
+}
+
+sharedVars.ipcRenderer.on('copyApolloData', async (event, arg) => {
+  const { id } = JSON.parse(arg)
+  try {
+    const decoded = await decodeApolloPacket(Number(id))
+    sharedVars.ipcRenderer.send('copyToClipboard', JSON.stringify(decoded, null, 2))
+  } catch (error) {
+    window.errorDialog('Could not copy Apollo data', error.message, false)
+  }
+})
+
+async function renderCurrentPacketInApolloViewer () {
+  if (!apolloViewerActive || currentPacket === undefined) return
+
+  const packetId = currentPacket
+  const packet = sharedVars.allPackets[packetId]
+  if (!isApolloPacket(packet)) return
+
+  if (apolloResults.has(packetId)) {
+    loadApolloTree(apolloResults.get(packetId))
+    return
+  }
+
+  const request = ++apolloDecodeRequest
+  loadApolloTree({ status: 'Loading the Apollo protobuf schema…' })
+
+  try {
+    const decoded = await decodeApolloPacket(packetId)
+    if (request !== apolloDecodeRequest || currentPacket !== packetId || !apolloViewerActive) return
+
+    loadApolloTree(decoded)
+  } catch (error) {
+    if (request !== apolloDecodeRequest || currentPacket !== packetId || !apolloViewerActive) return
+    loadApolloTree({ error: error.message })
+  }
+}
+
+function openApolloView (event) {
+  closeDataFind()
+  hexViewerActive = false
+  apolloViewerActive = true
+  window.openMenu(event, 'apollo', '-rightpanel')
+  renderCurrentPacketInApolloViewer()
+}
+
+function isDataViewActive () {
+  return sharedVars.proxyCapabilities.jsonData &&
+    currentPacket !== undefined &&
+    document.getElementById('tree').style.display !== 'none'
+}
+
+function collectDataFindMatches (value, query, path = [], matches = []) {
+  if (value === null || typeof value !== 'object') return matches
+
+  for (const key of Object.keys(value)) {
+    const child = value[key]
+    const childPath = path.concat(Array.isArray(value) ? Number(key) : key)
+    const labelMatches = String(key).toLowerCase().includes(query)
+    const valueMatches = child === null || typeof child !== 'object'
+      ? String(child).toLowerCase().includes(query)
+      : false
+
+    if (labelMatches || valueMatches) matches.push(childPath)
+    if (child !== null && typeof child === 'object') {
+      collectDataFindMatches(child, query, childPath, matches)
+    }
+  }
+
+  return matches
+}
+
+function getDataFindNode (path) {
+  let node = sharedVars.packetDom.getTree().rootNode
+
+  for (const label of path) {
+    if (!node || !node.isComplex) return
+    node.expand()
+    node = node.childNodes.find((child) => String(child.label) === String(label))
+  }
+
+  return node
+}
+
+function showDataFindMatch (index) {
+  document.querySelector('.jsontree_node.data-find-current')?.classList.remove('data-find-current')
+
+  if (dataFindMatches.length === 0) {
+    dataFindMatchIndex = -1
+    dataFindCount.textContent = '0/0'
+    return
+  }
+
+  dataFindMatchIndex = (index + dataFindMatches.length) % dataFindMatches.length
+  dataFindCount.textContent = `${dataFindMatchIndex + 1}/${dataFindMatches.length}`
+
+  const node = getDataFindNode(dataFindMatches[dataFindMatchIndex])
+  if (!node) return
+
+  node.el.classList.add('data-find-current')
+  node.el.scrollIntoView({ block: 'center' })
+}
+
+function updateDataFindResults () {
+  clearTimeout(dataFindTimer)
+  document.querySelector('.jsontree_node.data-find-current')?.classList.remove('data-find-current')
+
+  const query = dataFindInput.value.trim().toLowerCase()
+  if (!query || currentPacket === undefined) {
+    dataFindMatches = []
+    showDataFindMatch(-1)
+    return
+  }
+
+  const tree = sharedVars.packetDom.getTree()
+  dataFindMatches = collectDataFindMatches(tree.sourceJSONObj, query)
+  showDataFindMatch(0)
+}
+
+function scheduleDataFindUpdate () {
+  clearTimeout(dataFindTimer)
+  dataFindTimer = setTimeout(updateDataFindResults, 120)
+}
+
+function openDataFind () {
+  if (!isDataViewActive()) return
+
+  dataFind.hidden = false
+  dataFindInput.focus()
+  dataFindInput.select()
+  updateDataFindResults()
+}
+
+function closeDataFind () {
+  clearTimeout(dataFindTimer)
+  dataFind.hidden = true
+  document.querySelector('.jsontree_node.data-find-current')?.classList.remove('data-find-current')
+}
+
+dataFindInput.addEventListener('input', scheduleDataFindUpdate)
+dataFindInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    showDataFindMatch(dataFindMatchIndex + (event.shiftKey ? -1 : 1))
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    closeDataFind()
+  }
+})
+document.getElementById('data-find-previous').addEventListener('click', () => showDataFindMatch(dataFindMatchIndex - 1))
+document.getElementById('data-find-next').addEventListener('click', () => showDataFindMatch(dataFindMatchIndex + 1))
+document.getElementById('data-find-close').addEventListener('click', closeDataFind)
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && isDataViewActive()) {
+    event.preventDefault()
+    openDataFind()
+  }
+})
 
 function removeOrAddSelection (id, add) {
   const fakeElement = document.createElement('div')
@@ -456,6 +751,11 @@ window.packetClick = function (id) { // window. stops standardjs from complainin
   }
 
   currentPacket = id
+  const packet = sharedVars.allPackets[id]
+  const apolloPacket = isApolloPacket(packet)
+  apolloButton.hidden = !apolloPacket
+  apolloDecodeRequest++
+  if (!apolloPacket && apolloViewerActive) openDataView({ currentTarget: dataButton })
   // const element = document.getElementById('packet' + id)
   currentPacketType = sharedVars.allPackets[id].name
   removeOrAddSelection(currentPacket, true)
@@ -467,7 +767,12 @@ window.packetClick = function (id) { // window. stops standardjs from complainin
       sharedVars.packetDom.getTreeElement().firstElementChild.innerHTML = 'Could not parse packet'
       // TODO: Error message
     } else {
-      sharedVars.packetDom.getTree().loadData(sharedVars.allPackets[id].data)
+      const tree = sharedVars.packetDom.getTree()
+      tree.loadData(sharedVars.allPackets[id].data)
+      if (packet.meta.name !== 'map_chunk' && packet.meta.name !== 'map_chunk_bulk') {
+        tree.expand()
+      }
+      if (!dataFind.hidden) updateDataFindResults()
     }
   } else {
     sharedVars.packetDom.getTreeElement().innerText = sharedVars.allPackets[id].data.data
@@ -480,11 +785,10 @@ window.packetClick = function (id) { // window. stops standardjs from complainin
   }
 
   if (sharedVars.proxyCapabilities.rawData) {
-    hexViewer.style.display = 'block'
-    hexViewer.contentWindow.postMessage(Buffer.from(sharedVars.allPackets[id].raw))
+    renderCurrentPacketInHexViewer()
   }
 
-  scrollWikiToCurrentPacket()
+  if (apolloViewerActive) renderCurrentPacketInApolloViewer()
 }
 
 function hideAll (id) {
@@ -545,12 +849,14 @@ document.body.addEventListener('contextmenu', (event) => {
   }
 
   const id = target.id.replace('packet', '')
+  const packet = sharedVars.allPackets[Number(id)]
   sharedVars.ipcRenderer.send('contextMenu', JSON.stringify({
     direction: target.className.split(' ')[1],
     text: target.children[0].children[0].innerText + ' ' + target.children[0].children[1].innerText,
     id: id,
     invalid: target.classList.contains('invalid'),
-    noData: sharedVars.allPackets[Number(id)].data === undefined
+    noData: packet.data === undefined,
+    apollo: isApolloPacket(packet)
   }))
 })
 
@@ -561,125 +867,45 @@ var clusterize = new Clusterize({
   no_data_text: ''
 })
 
-// TODO: move to own file?
-async function fillWiki () {
-  let data = (await axios.get(sharedVars.proxyCapabilities.wikiVgPage)).data
-// Allow it to load properly
-  data = data
-    .split('/images/')
-    .join('https://wiki.vg/images/')
-    .split('/resources/assets/')
-    .join('https://wiki.vg/resources/assets/')
-    .split('/load.php?')
-    .join('https://wiki.vg/load.php?')
-
-  // TODO: Break or modify links?
-  document.getElementById('iframe').contentWindow.document.write(data)
-
-  const style = document.createElement('style');
-
-  style.innerHTML =
-     `::-webkit-scrollbar {
-          width: 17px;
-      }
-      
-      ::-webkit-scrollbar-thumb {
-          background: rgba(0, 0, 0, 0.3);
-          border-radius: 10px;
-      }
-      ::-webkit-scrollbar-track {
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 10px;
-      }
-      
-      ::-webkit-scrollbar-thumb:hover {
-        background: rgba(0, 0, 0, 0.5);
-      }
-      
-      ::-webkit-scrollbar-corner {
-        background: #242424;
-      }
-      
-      /* Cut off the left panel */
-      #content, #left-navigation {
-        margin-left: 0;
-      }
-      
-      #mw-panel {
-        display: none;
-      }
-      `
-
-  document.getElementById('iframe').contentDocument.head.appendChild(style)
-}
-
-if (sharedVars.proxyCapabilities.wikiVgPage) {
-  fillWiki()
-} else {
-  document.getElementById('wiki-button').style.display = 'none'
-}
-
-// https://gomakethings.com/finding-the-next-and-previous-sibling-elements-that-match-a-selector-with-vanilla-js/
-function getPreviousSibling (elem, selector) {
-
-  // Get the next sibling element
-  var sibling = elem.previousElementSibling;
-
-  // If there's no selector, return the first sibling
-  if (!selector) return sibling;
-
-  // If the sibling matches our selector, use it
-  // If not, jump to the next sibling and continue the loop
-  while (sibling) {
-    if (sibling.matches(selector)) return sibling;
-    sibling = sibling.previousElementSibling;
-  }
-
-};
-
-function scrollIdIntoView (id, bound) {
-  // https://stackoverflow.com/questions/3813294/how-to-get-element-by-innertext
-  const tdTags = document.getElementById('iframe').contentDocument.getElementsByTagName("td");
-  const searchRegex = new RegExp(`^<tr>\n<td( rowspan="[0-9]*")?>${id.toUpperCase().split('0X').join('0x')}\n<\/td>\n(<td( rowspan="[0-9]*")?>Play\n<\/td>\n)?<td( rowspan="[0-9]*")?>(${bound === 'serverbound' ? 'Server' : 'Client'}|Server &amp; Client)\n<\/td>`, 'm')
-  let found;
-
-  for (var i = 0; i < tdTags.length; i++) {
-    // console.log(tdTags[i].parentElement.outerHTML)
-    if (tdTags[i].parentElement.outerHTML.match(searchRegex)) {
-      found = tdTags[i];
-      break;
-    }
-  }
-  getPreviousSibling(found.closest('table'), 'h4').scrollIntoView()
-}
-
-function scrollWikiToCurrentPacket () {
-  if (currentPacket) {
-    const packet = sharedVars.allPackets[currentPacket]
-    try {
-      scrollIdIntoView(packet.hexIdString, packet.direction)
-    } catch (err) {
-      console.error(err);
-    }
-  }
-}
-
-function saveLog() {
+function saveLog () {
   sharedVars.ipcRenderer.send('saveLog', JSON.stringify(sharedVars.allPackets))
 }
 
-function loadLog() {
+function loadLog () {
   sharedVars.ipcRenderer.send('loadLog', '')
 }
 
-function saveScript( newfile = true ) {
+function saveScript (newfile = true) {
   if (newfile) {
     sharedVars.ipcRenderer.send('saveAsScript', window.scriptEditor.getDoc().getValue())
-  } else  {
+  } else {
     sharedVars.ipcRenderer.send('saveScript', window.scriptEditor.getDoc().getValue())
   }
 }
 
-function loadScript() {
+function loadScript () {
   sharedVars.ipcRenderer.send('loadScript', '')
 }
+
+// Expose handlers referenced from inline HTML attributes (module scope is not global)
+window.currentPacket = null
+Object.defineProperty(window, 'currentPacket', {
+  get: () => currentPacket,
+  set: (v) => { currentPacket = v }
+})
+window.toggleCheckbox = toggleCheckbox
+window.updateFilterBox = updateFilterBox
+window.updateFilteringTab = updateFilteringTab
+window.applyFilteringPreset = applyFilteringPreset
+window.openDataView = openDataView
+window.openHexView = openHexView
+window.openApolloView = openApolloView
+window.getVersionSpecificVar = getVersionSpecificVar
+window.findDefault = findDefault
+window.findPreset = findPreset
+window.editAndResend = editAndResend
+window.hideAll = hideAll
+window.saveLog = saveLog
+window.loadLog = loadLog
+window.saveScript = saveScript
+window.loadScript = loadScript

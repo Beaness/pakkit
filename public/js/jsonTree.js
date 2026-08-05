@@ -95,7 +95,18 @@ function compactView(json) {
   return out.trim()
 }
 
-const escapeHtml = require('escape-html')
+const escapeHtml = function (string) {
+  return ('' + string).replace(/["'&<>]/g, function (ch) {
+    switch (ch) {
+      case '"': return '&quot;'
+      case "'": return '&#39;'
+      case '&': return '&amp;'
+      case '<': return '&lt;'
+      case '>': return '&gt;'
+    }
+    return ch
+  })
+}
 
 // window. stops standardjs from complaining
 window.jsonTree = (function () {
@@ -605,13 +616,29 @@ window.jsonTree = (function () {
     self.childNodes = childNodes
     self.childNodesUl = childNodesUl
 
-    utils.forEachNode(val, function (label, node, isLast) {
-      self.addChild(new Node(label, node, isLast))
-    })
+    // Lazy loading: store the raw value and only build child nodes when
+    // the node is first expanded. This avoids creating tens of thousands
+    // of DOM elements for large packets (e.g. map_chunk_bulk) that may
+    // never be viewed.
+    self.val = val
+    self.childNodesBuilt = false
 
-    self.isEmpty = !childNodes.length
+    // Check emptiness without building all children
+    var isEmpty
+    if (self.type === 'array') {
+      isEmpty = val.length === 0
+    } else {
+      isEmpty = Object.keys(val).length === 0
+    }
+    self.isEmpty = isEmpty
     if (self.isEmpty) {
       el.classList.add('jsontree_node_empty')
+    }
+
+    // The root node is expanded by default, so build its children now.
+    // Non-root complex nodes stay lazy until expanded.
+    if (self.isRoot) {
+      self.buildChildNodes()
     }
   }
 
@@ -619,6 +646,26 @@ window.jsonTree = (function () {
 
   utils.extend(_NodeComplex.prototype, {
     constructor: _NodeComplex,
+
+    /*
+     * Lazily build child nodes from the stored value on first access.
+     * This avoids creating DOM elements for the entire subtree until the
+     * node is actually expanded.
+     */
+    buildChildNodes: function () {
+      if (this.childNodesBuilt) {
+        return
+      }
+      this.childNodesBuilt = true
+
+      var self = this
+      utils.forEachNode(this.val, function (label, node, isLast) {
+        self.addChild(new Node(label, node, isLast))
+      })
+
+      // Release the raw value so it can be garbage-collected
+      this.val = null
+    },
 
     /*
      * Add child node to list of child nodes
@@ -640,6 +687,8 @@ window.jsonTree = (function () {
       if (this.isEmpty) {
         return
       }
+
+      this.buildChildNodes()
 
       if (!this.isRoot) {
         this.el.classList.add('jsontree_node_expanded')
@@ -688,10 +737,16 @@ window.jsonTree = (function () {
         return
       }
 
+      var isExpanded = this.el.classList.contains('jsontree_node_expanded')
+      if (!isExpanded) {
+        // Build children before showing so the user sees them
+        this.buildChildNodes()
+      }
+
       this.el.classList.toggle('jsontree_node_expanded')
 
       if (isRecursive) {
-        const isExpanded = this.el.classList.contains('jsontree_node_expanded')
+        isExpanded = this.el.classList.contains('jsontree_node_expanded')
 
         this.childNodes.forEach(function (item, i) {
           if (item.isComplex) {
@@ -712,6 +767,8 @@ window.jsonTree = (function () {
       if (this.isEmpty) {
         return
       }
+
+      this.buildChildNodes()
 
       this.childNodes.forEach(function (item, i) {
         if (matcher(item)) {

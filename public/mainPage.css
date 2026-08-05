@@ -50,6 +50,10 @@ div.toolbar {
   position: relative; /* Is this needed? TODO: Check */
 }
 
+#sidebar {
+  position: relative;
+}
+
 .packetlist {
   list-style: none;
   padding: 0;
@@ -70,6 +74,10 @@ div.toolbar {
 }
 
 .packet.filter-hidden {
+  display: none;
+}
+
+.packet.packet-search-hidden {
   display: none;
 }
 
@@ -262,12 +270,56 @@ input.filter {
   width: 100%;
 }
 
-#iframe, #hex-viewer {
+#hex-viewer {
   border: 0;
   width: 100%;
   height: 100%;
 }
 
+.data-find {
+  align-items: center;
+  background: #242424;
+  border: 1px solid #1A1A1A;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  position: absolute;
+  right: 8px;
+  top: 28px;
+  z-index: 2;
+}
+
+.data-find[hidden] {
+  display: none;
+}
+
+.data-find input {
+  box-sizing: border-box;
+  height: 28px;
+  padding: 4px 8px;
+  width: 220px;
+}
+
+.data-find span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  min-width: 42px;
+  text-align: center;
+}
+
+.data-find button {
+  border-radius: 6px;
+  height: 28px;
+  padding: 2px 7px;
+}
+
+.jsontree_node.data-find-current > .jsontree_label-wrapper > .jsontree_label,
+.jsontree_node:not(.jsontree_node_complex).data-find-current > .jsontree_value-wrapper > .jsontree_value {
+  background: rgba(255, 210, 64, 0.25);
+  outline: 1px solid rgba(255, 210, 64, 0.7);
+}
 div.error {
   position: fixed;
   right: 8px;
@@ -278,12 +330,24 @@ div.error {
   user-select: text;
 }
 
+div.error.success {
+  color: #55d96b;
+}
+
 .packet.selected {
   background: rgba(64, 127, 255, 0.15);
 }
 
 #mainPresets, #extendedPresets {
   display: contents;
+}
+
+.filtering-search {
+  margin: 16px 0 8px;
+}
+
+.filtering-packets-box {
+  height: calc(100% - 152px);
 }
 
 .error-dialog {

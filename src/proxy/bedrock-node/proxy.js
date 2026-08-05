@@ -1,15 +1,14 @@
-const { Relay } = require('bedrock-protocol')
+import { Relay } from 'bedrock-protocol'
 
 let scriptingEnabled = false
 
-exports.capabilities = {
+export const capabilities = {
   modifyPackets: true,
   jsonData: true,
   rawData: false,
   scriptingSupport: false,
   clientboundPackets: {},
   serverboundPackets: {},
-  wikiVgPage: 'https://wiki.vg/Bedrock_Protocol',
   versionId: 'bedrock-node-1.17.10'
 }
 
@@ -24,7 +23,7 @@ let updateFilteringCallback
 let relay
 let relayPlayer
 
-exports.startProxy = function (passedHost, passedPort, passedListenPort, version, authConsent, passedPacketCallback,
+export function startProxy (passedHost, passedPort, passedListenPort, version, authConsent, passedPacketCallback,
   passedMessageCallback, passedDataFolder, passedUpdateFilteringCallback, authCodeCallback) {
   host = passedHost
   port = passedPort
@@ -52,7 +51,7 @@ exports.startProxy = function (passedHost, passedPort, passedListenPort, version
   relay.on('connect', player => {
     relayPlayer = player
     console.log('New connection', player.connection.address)
-  
+
     // Server is sending a message to the client.
     player.on('clientbound', ({ name, params }) => {
       // TODO: check validity
@@ -65,17 +64,17 @@ exports.startProxy = function (passedHost, passedPort, passedListenPort, version
   })
 }
 
-exports.end = function () {
+export function end () {
   // TODO
 }
 
-exports.writeToClient = function (meta, data) {
+export function writeToClient (meta, data) {
   if (relayPlayer) {
     relayPlayer.queue(meta.name, data)
   }
 }
 
-exports.writeToServer = function (meta, data) {
+export function writeToServer (meta, data) {
   if (relayPlayer) {
     relayPlayer.upstream.queue(meta.name, data)
   }
