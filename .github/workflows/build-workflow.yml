@@ -2,6 +2,9 @@ name: Build pakkit
 
 on: push
 
+permissions:
+  contents: write
+
 jobs:
   build-job:
     runs-on: ubuntu-latest
