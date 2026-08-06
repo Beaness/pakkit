@@ -41,6 +41,8 @@
                 onclick="openMenu(event, 'Packets', '-topmenu')" type="button">Packets</button>
         <button aria-controls="Filtering" aria-selected="false" class="tab-button tablinks-topmenu" role="tab"
                 onclick="openMenu(event, 'Filtering', '-topmenu')" type="button">Filtering</button>
+        <button aria-controls="Bandwidth" aria-selected="false" class="tab-button tablinks-topmenu" role="tab"
+                onclick="openMenu(event, 'Bandwidth', '-topmenu')" type="button">Bandwidth</button>
         <button aria-controls="Scripting" aria-selected="false" class="tab-button tablinks-topmenu" id="scriptingTab" role="tab"
                 onclick="openMenu(event, 'Scripting', '-topmenu')" type="button">Scripting</button>
         <button aria-controls="Settings" aria-selected="false" class="tab-button tablinks-topmenu" role="tab"
@@ -61,6 +63,133 @@
 
 <div class="topbar">
     <div class="tabcontent tabcontent-topmenu" id="Packets" style="display: block;"></div>
+
+    <section class="tabcontent tabcontent-topmenu fullpage" id="Bandwidth">
+        <div class="page-shell bandwidth-page">
+            <header class="page-heading bandwidth-heading">
+                <div>
+                    <p class="eyebrow">Traffic analysis</p>
+                    <h1>Bandwidth</h1>
+                    <p>See throughput over time and which raw packets account for the most data.</p>
+                </div>
+                <div class="bandwidth-controls">
+                    <label class="bandwidth-select-label" for="bandwidth-range">
+                        <span>Time window</span>
+                        <select id="bandwidth-range">
+                            <option value="10000">Last 10 seconds</option>
+                            <option selected value="30000">Last 30 seconds</option>
+                            <option value="60000">Last minute</option>
+                            <option value="300000">Last 5 minutes</option>
+                            <option value="all">Entire capture</option>
+                        </select>
+                    </label>
+                    <label class="toggle-row bandwidth-compression-toggle" for="bandwidth-use-compressed"
+                           title="Use the encoded packet size when Minecraft compression was applied">
+                        <span>Use compressed size</span>
+                        <span class="switch">
+                            <input checked id="bandwidth-use-compressed" type="checkbox">
+                            <span class="slider round"></span>
+                        </span>
+                    </label>
+                    <div aria-label="Packet direction" class="bandwidth-direction-filter" role="group">
+                        <button aria-pressed="true" class="active" data-direction="all" type="button">All traffic</button>
+                        <button aria-pressed="false" data-direction="clientbound" type="button"><span class="direction-dot clientbound-dot"></span>Clientbound</button>
+                        <button aria-pressed="false" data-direction="serverbound" type="button"><span class="direction-dot serverbound-dot"></span>Serverbound</button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="bandwidth-unavailable" hidden id="bandwidth-unavailable">
+                Raw packet sizes are not available for the current proxy.
+            </div>
+
+            <div class="bandwidth-stats" aria-live="polite">
+                <article class="bandwidth-stat-card featured">
+                    <span class="bandwidth-stat-label">Average bandwidth</span>
+                    <strong id="bandwidth-average">0 B/s</strong>
+                    <span id="bandwidth-average-detail">Across the last 30 seconds</span>
+                </article>
+                <article class="bandwidth-stat-card">
+                    <span class="bandwidth-stat-label">Transferred</span>
+                    <strong id="bandwidth-total">0 B</strong>
+                    <span id="bandwidth-total-detail">0 measured packets</span>
+                </article>
+                <article class="bandwidth-stat-card">
+                    <span class="bandwidth-stat-label">Peak bandwidth</span>
+                    <strong id="bandwidth-peak">0 B/s</strong>
+                    <span id="bandwidth-peak-detail">Highest chart interval</span>
+                </article>
+                <article class="bandwidth-stat-card">
+                    <span class="bandwidth-stat-label">Largest packet type</span>
+                    <strong class="packet-type-stat" id="bandwidth-largest-type">—</strong>
+                    <span id="bandwidth-largest-detail">No measured packets</span>
+                </article>
+            </div>
+
+            <section class="bandwidth-card bandwidth-chart-card" aria-labelledby="bandwidth-chart-title">
+                <div class="bandwidth-card-heading">
+                    <div>
+                        <h2 id="bandwidth-chart-title">Bandwidth over time</h2>
+                        <p id="bandwidth-window-label">Last 30 seconds</p>
+                    </div>
+                    <div class="bandwidth-chart-legend">
+                        <span><span class="legend-line total"></span>Total</span>
+                        <span data-chart-direction="clientbound"><span class="legend-line clientbound"></span>Clientbound</span>
+                        <span data-chart-direction="serverbound"><span class="legend-line serverbound"></span>Serverbound</span>
+                        <span><span class="legend-line"></span>Average</span>
+                    </div>
+                </div>
+                <div class="bandwidth-chart" id="bandwidth-chart"></div>
+            </section>
+
+            <div class="bandwidth-breakdown-grid">
+                <section class="bandwidth-card packet-share-card" aria-labelledby="packet-share-title">
+                    <div class="bandwidth-card-heading">
+                        <div>
+                            <h2 id="packet-share-title">Packet share</h2>
+                            <p>Top packet types by bytes</p>
+                        </div>
+                    </div>
+                    <div class="packet-share-content">
+                        <div aria-label="Packet byte distribution" class="packet-share-donut" id="packet-share-donut">
+                            <div><strong id="packet-share-total">0 B</strong><span>Total</span></div>
+                        </div>
+                        <ol class="packet-share-legend" id="packet-share-legend"></ol>
+                    </div>
+                </section>
+
+                <section class="bandwidth-card packet-ranking-card" aria-labelledby="packet-ranking-title">
+                    <div class="bandwidth-card-heading ranking-heading">
+                        <div>
+                            <h2 id="packet-ranking-title">Packet usage</h2>
+                            <p id="packet-ranking-measure-label">Ordered by compressed size when available</p>
+                        </div>
+                        <label class="search-field bandwidth-search" for="bandwidth-search">
+                            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg>
+                            <input autocomplete="off" id="bandwidth-search" placeholder="Find a packet type" type="search">
+                        </label>
+                    </div>
+                    <div class="packet-ranking-table-wrap">
+                        <table class="packet-ranking-table">
+                            <thead>
+                            <tr>
+                                <th scope="col">Packet</th>
+                                <th scope="col">Direction</th>
+                                <th class="number-column" scope="col">Packets</th>
+                                <th class="number-column" scope="col">Average</th>
+                                <th class="number-column" scope="col">Total</th>
+                                <th class="number-column" scope="col">Share</th>
+                            </tr>
+                            </thead>
+                            <tbody id="packet-ranking-body"></tbody>
+                        </table>
+                        <div class="packet-ranking-empty" id="packet-ranking-empty">Waiting for raw packet data…</div>
+                    </div>
+                    <p class="packet-ranking-summary" id="packet-ranking-summary"></p>
+                </section>
+            </div>
+        </div>
+    </section>
 
     <section class="tabcontent tabcontent-topmenu fullpage" id="Filtering">
         <div class="page-shell">

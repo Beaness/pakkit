@@ -64,9 +64,12 @@ export function init (window, passedIpcMain, passedProxy) {
   })
 }
 
-export function packetHandler (direction, meta, data, id, raw, canUseScripting, packetValid) {
+export function packetHandler (direction, meta, data, id, raw, canUseScripting, packetValid, sizeInfo) {
   try {
-    mainWindow.send('packet', JSON.stringify({ meta: meta, data: data, direction: direction, hexIdString: id, raw: raw, time: Date.now(), packetValid: packetValid }))
+    const byteSize = raw?.length ?? 0
+    const compressedByteSize = sizeInfo?.compressedByteSize ?? byteSize
+    const wasCompressed = sizeInfo?.wasCompressed ?? false
+    mainWindow.send('packet', JSON.stringify({ meta: meta, data: data, direction: direction, hexIdString: id, raw: raw, byteSize: byteSize, compressedByteSize: compressedByteSize, wasCompressed: wasCompressed, time: Date.now(), packetValid: packetValid }))
     // TODO: Maybe write raw data?
     if (proxy.capabilities.scriptingSupport && canUseScripting && scriptingEnabled) {
       try {

@@ -16,6 +16,40 @@ let storedCallback
 
 let scriptingEnabled = false
 
+function readVarInt (buffer) {
+  let value = 0
+  for (let index = 0; index < Math.min(buffer.length, 5); index++) {
+    const byte = buffer[index]
+    value += (byte & 0x7f) * Math.pow(2, 7 * index)
+    if ((byte & 0x80) === 0) return value
+  }
+  return 0
+}
+
+// minecraft-protocol's raw event is emitted after decompression. The splitter
+// sees one framed packet before decompression, so observe it first and pair its
+// encoded size with the next raw event.
+function trackEncodedPacketSizes (protocolClient) {
+  const pendingSizes = []
+
+  protocolClient.splitter.prependListener('data', buffer => {
+    const wasCompressed = protocolClient.decompressor !== null && readVarInt(buffer) > 0
+    pendingSizes.push({
+      wasCompressed,
+      encodedByteSize: buffer.length
+    })
+  })
+
+  return raw => {
+    const pending = pendingSizes.shift()
+    const rawByteSize = raw?.length ?? 0
+    return {
+      wasCompressed: pending?.wasCompressed ?? false,
+      compressedByteSize: pending?.wasCompressed ? pending.encodedByteSize : rawByteSize
+    }
+  }
+}
+
 // https://gist.github.com/timoxley/1689041
 function isPortTaken (port, fn) {
   const tester = net.createServer()
@@ -89,7 +123,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
       let srv
       try {
         const serverOptions = {
-          'online-mode': false,
+          'online-mode': onlineMode,
           port: listenPort,
           keepAlive: false,
           // minecraft-protocol reads the protocol version from each incoming
@@ -123,6 +157,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
         return
       }
       srv.on('login', function (client) {
+        const getClientPacketSize = trackEncodedPacketSizes(client)
         realClient = client
         const connectionVersion = useClientVersion ? client.protocolVersion : version
         const addr = client.socket.remoteAddress
@@ -160,6 +195,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           }
         }
         const targetClient = mc.createClient(clientOptions)
+        const getTargetPacketSize = trackEncodedPacketSizes(targetClient)
         targetClient.on('session', function (session) {
           // Login complete - the dialog can be closed
           console.log('Login done')
@@ -181,7 +217,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           return id
         }
 
-        function handleServerboundPacket (data, meta, raw, packetValid) {
+        function handleServerboundPacket (data, meta, raw, packetValid, sizeInfo) {
           // console.log('serverbound packet', meta, data)
           if (targetClient.state === states.PLAY && meta.state === states.PLAY) {
             const id = getId(meta, toServerMappings)
@@ -197,11 +233,11 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
                 // targetClient.write(meta.name, data)
                 targetClient.writeRaw(raw)
               }
-              callback(direction, meta, data, id, [...raw], canUseScripting, packetValid)
+              callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
             }
           }
         }
-        function handleClientboundPacket (data, meta, raw, packetValid) {
+        function handleClientboundPacket (data, meta, raw, packetValid, sizeInfo) {
           if (meta.state === states.PLAY && client.state === states.PLAY) {
             const id = getId(meta, toClientMappings)
 
@@ -216,24 +252,26 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
                 // client.write(meta.name, data)
                 client.writeRaw(raw)
               }
-              callback(direction, meta, data, id, [...raw], canUseScripting, packetValid)
+              callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
               if (meta.name === 'set_compression') {
                 client.compressionThreshold = data.threshold
               } // Set compression
             }
           }
         }
-        targetClient.on('packet', function (data, meta, buffer, fullBuffer) {
+        targetClient.on('raw', function (raw, meta) {
+          const sizeInfo = getTargetPacketSize(raw)
           if (client.state !== states.PLAY || meta.state !== states.PLAY) { return }
 
+          const data = targetClient.deserializer.parsePacketBuffer(raw).data.params
           let packetValid = false
           try {
             const packetBuff = client.serializer.createPacketBuffer({ name: meta.name, params: data })
-            if (!bufferEqual(fullBuffer, packetBuff)) {
+            if (!bufferEqual(raw, packetBuff)) {
               console.log('client<-server: Error in packet ' + meta.state + '.' + meta.name)
-              console.log('received buffer', fullBuffer.toString('hex'))
+              console.log('received buffer', raw.toString('hex'))
               console.log('produced buffer', packetBuff.toString('hex'))
-              console.log('received length', fullBuffer.length)
+              console.log('received length', raw.length)
               console.log('produced length', packetBuff.length)
             } else {
               packetValid = true
@@ -241,7 +279,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           } catch (e) {
             // TODO: handle?
           }
-          handleClientboundPacket(data, meta, fullBuffer, packetValid)
+          handleClientboundPacket(data, meta, raw, packetValid, sizeInfo)
           /* if (client.state === states.PLAY && brokenPackets.indexOf(packetId.value) !=== -1)
            {
            console.log(`client<-server: raw packet);
@@ -250,17 +288,18 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
            client.writeRaw(buffer);
            } */
         })
-        client.on('packet', function (data, meta, buffer, fullBuffer) {
+        client.on('raw', function (raw, meta) {
+          const sizeInfo = getClientPacketSize(raw)
           if (meta.state !== states.PLAY || targetClient.state !== states.PLAY) { return }
-          const packetData = client.deserializer.parsePacketBuffer(fullBuffer).data.params
+          const packetData = client.deserializer.parsePacketBuffer(raw).data.params
           let packetValid = false
           try {
             const packetBuff = targetClient.serializer.createPacketBuffer({ name: meta.name, params: packetData })
-            if (!bufferEqual(fullBuffer, packetBuff)) {
+            if (!bufferEqual(raw, packetBuff)) {
               console.log('client->server: Error in packet ' + meta.state + '.' + meta.name)
-              console.log('received buffer', fullBuffer.toString('hex'))
+              console.log('received buffer', raw.toString('hex'))
               console.log('produced buffer', packetBuff.toString('hex'))
-              console.log('received length', fullBuffer.length)
+              console.log('received length', raw.length)
               console.log('produced length', packetBuff.length)
             } else {
               packetValid = true
@@ -272,7 +311,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
             // Unknown packet ID so packet is invalid
             packetValid = false
           }
-          handleServerboundPacket(packetData, meta, fullBuffer, packetValid)
+          handleServerboundPacket(packetData, meta, raw, packetValid, sizeInfo)
         })
         targetClient.on('end', function () {
           endedTargetClient = true

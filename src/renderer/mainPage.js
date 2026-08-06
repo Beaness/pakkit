@@ -8,6 +8,7 @@ import * as scripting from './scripting.js'
 import * as packetDom from './packetDom.js'
 import * as ipcHandler from './ipcHandler.js'
 import * as settings from './settings.js'
+import * as bandwidth from './bandwidth.js'
 
 let currentPacket
 let currentPacketType
@@ -210,6 +211,8 @@ sharedVars.scripting = scripting
 sharedVars.scripting.setup(sharedVars)
 sharedVars.packetDom = packetDom
 sharedVars.packetDom.setup(sharedVars)
+sharedVars.bandwidth = bandwidth
+sharedVars.bandwidth.setup(sharedVars)
 sharedVars.ipcHandler = ipcHandler
 sharedVars.ipcHandler.setup(sharedVars)
 sharedVars.settings = settings
@@ -562,6 +565,7 @@ window.clearPackets = function () { // window. stops standardjs from complaining
   sharedVars.packetsUpdated = true
   // TODO: Doesn't seem to work? When removing line above it doesn't do anything until the next packet
   wrappedClusterizeUpdate([])
+  sharedVars.bandwidth.reset()
 }
 
 window.showAllPackets = function () { // window. stops standardjs from complaining
@@ -961,6 +965,7 @@ window.openMenu = function (evt, MenuName, id) { // window. stops standardjs fro
 
   if (id === '-topmenu') {
     document.querySelector('.container').inert = MenuName !== 'Packets'
+    if (MenuName === 'Bandwidth') sharedVars.bandwidth.viewOpened()
   }
 }
 

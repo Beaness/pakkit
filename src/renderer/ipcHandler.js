@@ -43,6 +43,7 @@ export function setup (passedSharedVars) {
   sharedVars.ipcRenderer.on('packet', (event, arg) => {
     const ipcMessage = JSON.parse(arg)
     sharedVars.packetDom.addPacket(ipcMessage)
+    sharedVars.bandwidth.packetAdded()
   })
 
   sharedVars.ipcRenderer.on('error', (event, arg) => {
@@ -74,10 +75,15 @@ export function setup (passedSharedVars) {
   })
 
   sharedVars.ipcRenderer.on('loadLogData', (event, arg) => {
+    window.deselectPacket()
     sharedVars.allPackets = JSON.parse(arg)
-    for (const packet of sharedVars.allPackets) {
+    sharedVars.allPacketsHTML = []
+    sharedVars.hiddenPacketsAmount = 0
+    sharedVars.allPackets.forEach((packet, index) => {
+      packet.uid = index
       sharedVars.packetDom.addPacketToDOM(packet)
-    }
+    })
+    sharedVars.bandwidth.logLoaded()
   })
 
   sharedVars.ipcRenderer.on('loadScriptData', (event, arg) => {
