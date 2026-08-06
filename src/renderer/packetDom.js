@@ -5,7 +5,7 @@ let sharedVars
 function trimData (data) { // Function to trim the size of stringified data for previews
   if (data === undefined) {
     // Undefined data, probably an invalid packet
-    return 'Could not parse packet'
+    return 'Failed to deserialize this packet'
   }
 
   let newData

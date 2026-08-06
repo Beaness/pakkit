@@ -10,6 +10,7 @@ import {
   installGeneratedPacketBlocker,
   shouldProxyState
 } from './configuration.mjs'
+import { isPacketParseError, observeRawPackets } from './rawPacketCapture.mjs'
 
 const states = mc.states
 
@@ -21,40 +22,6 @@ let statePacketMappings
 let storedCallback
 
 let scriptingEnabled = false
-
-function readVarInt (buffer) {
-  let value = 0
-  for (let index = 0; index < Math.min(buffer.length, 5); index++) {
-    const byte = buffer[index]
-    value += (byte & 0x7f) * Math.pow(2, 7 * index)
-    if ((byte & 0x80) === 0) return value
-  }
-  return 0
-}
-
-// minecraft-protocol's raw event is emitted after decompression. The splitter
-// sees one framed packet before decompression, so observe it first and pair its
-// encoded size with the next raw event.
-function trackEncodedPacketSizes (protocolClient) {
-  const pendingSizes = []
-
-  protocolClient.splitter.prependListener('data', buffer => {
-    const wasCompressed = protocolClient.decompressor !== null && readVarInt(buffer) > 0
-    pendingSizes.push({
-      wasCompressed,
-      encodedByteSize: buffer.length
-    })
-  })
-
-  return raw => {
-    const pending = pendingSizes.shift()
-    const rawByteSize = raw?.length ?? 0
-    return {
-      wasCompressed: pending?.wasCompressed ?? false,
-      compressedByteSize: pending?.wasCompressed ? pending.encodedByteSize : rawByteSize
-    }
-  }
-}
 
 // https://gist.github.com/timoxley/1689041
 function isPortTaken (port, fn) {
@@ -180,7 +147,6 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
         return
       }
       srv.on('login', function (client) {
-        const getClientPacketSize = trackEncodedPacketSizes(client)
         realClient = client
         const connectionVersion = useClientVersion ? client.protocolVersion : version
         const addr = client.socket.remoteAddress
@@ -193,6 +159,10 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           if (!endedTargetClient) { targetClient.end('End') }
         })
         client.on('error', function (err) {
+          if (isPacketParseError(err)) {
+            console.warn('Client packet could not be deserialized; forwarded the raw packet instead')
+            return
+          }
           endedClient = true
           console.log('Connection error by client', '(' + addr + ')')
           console.log(err.stack)
@@ -236,7 +206,6 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
         installGeneratedPacketBlocker(targetClient, states.PLAY, [
           'configuration_acknowledged'
         ])
-        const getTargetPacketSize = trackEncodedPacketSizes(targetClient)
         targetClient.on('session', function (session) {
           // Login complete - the dialog can be closed
           console.log('Login done')
@@ -281,7 +250,11 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
 
             console.log(direction + ': Error in packet ' + meta.state + '.' + meta.name)
             console.log('received buffer', raw.toString('hex'))
-            console.log('produced buffer', packetBuff.toString('hex'))
+            const producedHex = packetBuff.toString('hex')
+            console.log(
+              producedHex.length > 1000 ? 'produced buffer (cut off to 1000 chars)' : 'produced buffer',
+              producedHex.slice(0, 1000)
+            )
             console.log('received length', raw.length)
             console.log('produced length', packetBuff.length)
           } catch (e) {
@@ -291,7 +264,17 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           return false
         }
 
-        function handleServerboundPacket (data, meta, raw, packetValid, sizeInfo) {
+        function writeCapturedRaw (destination, packet) {
+          if (packet.rawEncoding === 'compressed' && destination.compressor !== null) {
+            // Decompression itself failed. Preserve the original compressed
+            // payload instead of trying to compress it a second time.
+            destination.framer.write(packet.raw)
+          } else {
+            destination.writeRaw(packet.raw)
+          }
+        }
+
+        function handleServerboundPacket (data, meta, raw, packetValid, sizeInfo, deserializationError, rawEncoding) {
           const id = getId(meta, getPacketMappings(meta.state, 'toServer'))
 
           // Configuration traffic must remain transparent. PLAY packets keep
@@ -300,14 +283,14 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           const canUseScripting = meta.state === states.PLAY && meta.name !== 'configuration_acknowledged'
 
           if (!endedTargetClient) {
-            if (!scriptingEnabled || !canUseScripting) {
-              targetClient.writeRaw(raw)
+            if (deserializationError || !scriptingEnabled || !canUseScripting) {
+              writeCapturedRaw(targetClient, { raw, rawEncoding })
             }
-            callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
+            callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo, deserializationError)
           }
         }
 
-        function handleClientboundPacket (data, meta, raw, packetValid, sizeInfo) {
+        function handleClientboundPacket (data, meta, raw, packetValid, sizeInfo, deserializationError, rawEncoding) {
           const id = getId(meta, getPacketMappings(meta.state, 'toClient'))
 
           const direction = 'clientbound'
@@ -327,10 +310,10 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
                 })
               })
             }
-            if (!scriptingEnabled || !canUseScripting) {
-              client.writeRaw(raw)
+            if (deserializationError || !scriptingEnabled || !canUseScripting) {
+              writeCapturedRaw(client, { raw, rawEncoding })
             }
-            callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
+            callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo, deserializationError)
           }
         }
 
@@ -349,7 +332,9 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
             packet.meta,
             packet.raw,
             packet.packetValid,
-            packet.sizeInfo
+            packet.sizeInfo,
+            packet.deserializationError,
+            packet.rawEncoding
           ),
           handleQueueOverflow
         )
@@ -361,38 +346,29 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
             packet.meta,
             packet.raw,
             packet.packetValid,
-            packet.sizeInfo
+            packet.sizeInfo,
+            packet.deserializationError,
+            packet.rawEncoding
           ),
           handleQueueOverflow
         )
 
-        // packet includes the parsed data and decompressed raw bytes before
-        // minecraft-protocol's named event handlers advance the state. That is
-        // essential for forwarding Finish Configuration in the correct codec.
-        targetClient.on('packet', function (data, meta, raw) {
-          const sizeInfo = getTargetPacketSize(raw)
-          if (!shouldProxyState(meta.state)) return
-
-          routeToClient({
-            data,
-            meta,
-            raw,
-            packetValid: validatePacket('clientbound', data, meta, raw),
-            sizeInfo
-          })
+        // Capture before deserialization so even malformed packets are routed.
+        // Successful packets are also handled here to keep forwarding ordered.
+        observeRawPackets(targetClient, state => getPacketMappings(state, 'toClient'), packet => {
+          if (!shouldProxyState(packet.meta.state)) return
+          if (!packet.deserializationError) {
+            packet.packetValid = validatePacket('clientbound', packet.data, packet.meta, packet.raw)
+          }
+          routeToClient(packet)
         })
 
-        client.on('packet', function (data, meta, raw) {
-          const sizeInfo = getClientPacketSize(raw)
-          if (!shouldProxyState(meta.state)) return
-
-          routeToServer({
-            data,
-            meta,
-            raw,
-            packetValid: validatePacket('serverbound', data, meta, raw),
-            sizeInfo
-          })
+        observeRawPackets(client, state => getPacketMappings(state, 'toServer'), packet => {
+          if (!shouldProxyState(packet.meta.state)) return
+          if (!packet.deserializationError) {
+            packet.packetValid = validatePacket('serverbound', packet.data, packet.meta, packet.raw)
+          }
+          routeToServer(packet)
         })
         targetClient.on('end', function () {
           endedTargetClient = true
@@ -400,6 +376,10 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           if (!endedClient) { client.end('Connection closed by server ' + '(' + host + ':' + port + ')') }
         })
         targetClient.on('error', function (err) {
+          if (isPacketParseError(err)) {
+            console.warn('Server packet could not be deserialized; forwarded the raw packet instead')
+            return
+          }
           endedTargetClient = true
           console.log('Connection error by server', '(' + host + ':' + port + ') ', err)
           console.log(err.stack)

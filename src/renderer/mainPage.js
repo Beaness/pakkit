@@ -10,6 +10,7 @@ import * as settings from './settings.js'
 import * as bandwidth from './bandwidth.js'
 import { formatHexDump } from './hexDump.js'
 import { appendVisiblePacketRows } from './visiblePacketRows.mjs'
+import { createPacketFailureView } from './packetFailureView.mjs'
 
 let currentPacket
 let currentPacketType
@@ -21,6 +22,7 @@ const hiddenPacketsCounter = document.getElementById('hiddenPackets')
 const showAllPacketsButton = document.getElementById('showAllPacketsButton')
 const packetCount = document.getElementById('packetCount')
 const copySelectedPacketButton = document.getElementById('copySelectedPacketButton')
+const editAndResendButton = document.getElementById('editAndResend')
 
 const filterWorker = new Worker(new URL('./filterWorker.js', import.meta.url), { type: 'module' })
 
@@ -989,6 +991,7 @@ window.packetClick = function (id) { // window. stops standardjs from complainin
   currentPacket = id
   const packet = sharedVars.allPackets[id]
   copySelectedPacketButton.disabled = packet.data === undefined
+  editAndResendButton.disabled = packet.data === undefined
   const apolloPacket = isApolloPacket(packet)
   apolloButton.hidden = !apolloPacket
   apolloDecodeRequest++
@@ -1002,8 +1005,10 @@ window.packetClick = function (id) { // window. stops standardjs from complainin
   if (sharedVars.proxyCapabilities.jsonData) {
     // sidebar.innerHTML = '<div style="padding: 10px;">Loading packet data...</div>';
     if (sharedVars.allPackets[id].data === undefined) {
-      sharedVars.packetDom.getTreeElement().firstElementChild.innerHTML = 'Could not parse packet'
-      // TODO: Error message
+      const tree = sharedVars.packetDom.getTree()
+      tree.loadData(createPacketFailureView(packet))
+      tree.expand()
+      if (!dataFind.hidden) updateDataFindResults()
     } else {
       const tree = sharedVars.packetDom.getTree()
       tree.loadData(sharedVars.allPackets[id].data)

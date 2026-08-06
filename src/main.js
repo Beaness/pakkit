@@ -81,6 +81,7 @@ function makeMenu (direction, text, id, invalid, noData, apollo) {
     },
     {
       label: 'Edit and resend',
+      enabled: !noData,
       click: () => {
         BrowserWindow.getAllWindows()[0].send('editAndResend', JSON.stringify({
           id: id
