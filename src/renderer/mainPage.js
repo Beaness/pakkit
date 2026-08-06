@@ -1,7 +1,6 @@
 /* global Split, jsonTree, escapeHtml, alert, CodeMirror */
 
 import Clusterize from 'clusterize.js'
-import * as filteringLogic from './filteringLogic.js'
 import './errorHandler.js'
 import defaultsJson from './defaults.json'
 import * as scripting from './scripting.js'
@@ -21,22 +20,18 @@ const showAllPacketsButton = document.getElementById('showAllPacketsButton')
 const packetCount = document.getElementById('packetCount')
 const copySelectedPacketButton = document.getElementById('copySelectedPacketButton')
 
-// Should improve performance by excluding hidden packets
-function wrappedClusterizeUpdate (htmlArray) {
-  sharedVars.hiddenPacketsAmount = sharedVars.allPackets.reduce((total, packet) => {
-    const hiddenByType = sharedVars.hiddenPackets[packet.direction]?.includes(packet.meta.name)
-    return total + (hiddenByType ? 1 : 0)
-  }, 0)
-  const newArray = []
-  for (const item of htmlArray) {
-    // If the packet is hidden
-    if (item[0].match(/<li .* class=".*filter-hidden.*">/)) {
-      continue
-    } else {
-      newArray.push(item)
-    }
-  }
-  clusterize.update(newArray)
+const filterWorker = new Worker(new URL('./filterWorker.js', import.meta.url), { type: 'module' })
+
+let clusterize
+let filterRevision = 0
+let filterResultPending = false
+let filterPacketFlushTimer
+let visiblePacketFlushTimer
+let pendingFilterPackets = []
+let pendingVisiblePacketRows = []
+const visibleAfterFilterSnapshot = new Set()
+
+function updatePacketSummary () {
   const packetTotal = sharedVars.allPackets.length
   packetCount.textContent = `${packetTotal.toLocaleString()} ${packetTotal === 1 ? 'packet' : 'packets'}`
   packetCount.setAttribute('aria-label', `${packetTotal} captured packets`)
@@ -44,6 +39,162 @@ function wrappedClusterizeUpdate (htmlArray) {
   hiddenPacketsCounter.classList.toggle('visible', sharedVars.hiddenPacketsAmount !== 0)
   showAllPacketsButton.hidden = sharedVars.hiddenPacketsAmount === 0
 }
+
+function filterOptions (type) {
+  return {
+    type,
+    revision: filterRevision,
+    query: sharedVars.lastFilter,
+    inverseFiltering: sharedVars.settings.getSetting('inverseFiltering'),
+    regexFilter: sharedVars.settings.getSetting('regexFilter'),
+    hiddenPackets: sharedVars.hiddenPackets
+  }
+}
+
+function flushFilterPacketQueue () {
+  if (filterPacketFlushTimer !== undefined) {
+    clearTimeout(filterPacketFlushTimer)
+    filterPacketFlushTimer = undefined
+  }
+  if (pendingFilterPackets.length === 0) return
+
+  const packets = pendingFilterPackets
+  pendingFilterPackets = []
+  filterWorker.postMessage({ type: 'add', packets })
+}
+
+function queuePacketForFiltering (packet) {
+  pendingFilterPackets.push({
+    uid: packet.uid,
+    direction: packet.direction,
+    name: packet.meta.name,
+    hexIdString: packet.hexIdString,
+    data: packet.data
+  })
+
+  if (filterPacketFlushTimer === undefined) {
+    filterPacketFlushTimer = window.setTimeout(flushFilterPacketQueue, 16)
+  }
+}
+
+function wasPacketListScrolledToBottom () {
+  const scrollElement = sharedVars.packetList.parentElement
+  const diff = (scrollElement.scrollHeight - scrollElement.offsetHeight) - scrollElement.scrollTop
+  return diff < 3
+}
+
+function keepPacketListAtBottom () {
+  const scrollElement = sharedVars.packetList.parentElement
+  scrollElement.scrollTop = scrollElement.scrollHeight
+  window.setTimeout(() => {
+    scrollElement.scrollTop = scrollElement.scrollHeight
+  }, 10)
+}
+
+function flushVisiblePacketRows () {
+  visiblePacketFlushTimer = undefined
+  if (pendingVisiblePacketRows.length === 0) {
+    updatePacketSummary()
+    return
+  }
+
+  const wasScrolledToBottom = wasPacketListScrolledToBottom()
+  const rows = pendingVisiblePacketRows
+  pendingVisiblePacketRows = []
+
+  // Avoid spread here: a loaded log can contain more arguments than the JS
+  // engine accepts in a single function call.
+  for (const row of rows) sharedVars.visiblePacketsHTML.push(row)
+  clusterize.append(rows)
+  updatePacketSummary()
+
+  if (wasScrolledToBottom) keepPacketListAtBottom()
+}
+
+function scheduleVisiblePacketFlush () {
+  if (visiblePacketFlushTimer !== undefined) return
+  visiblePacketFlushTimer = window.setTimeout(flushVisiblePacketRows, 50)
+}
+
+function queueVisiblePacketIds (visibleIds) {
+  for (const id of visibleIds) {
+    const row = sharedVars.allPacketsHTML[id]
+    if (!row) continue
+    pendingVisiblePacketRows.push(row)
+  }
+  scheduleVisiblePacketFlush()
+}
+
+function cancelPendingVisibleRows () {
+  if (visiblePacketFlushTimer !== undefined) {
+    clearTimeout(visiblePacketFlushTimer)
+    visiblePacketFlushTimer = undefined
+  }
+  pendingVisiblePacketRows = []
+}
+
+function applyFilterResult (message) {
+  const { revision, packetCount: indexedPacketCount, visibleIds } = message
+  const nextRows = []
+  let index = 0
+
+  function materializeChunk () {
+    if (revision !== filterRevision) return
+
+    const deadline = performance.now() + 8
+    while (index < visibleIds.length && performance.now() < deadline) {
+      const id = visibleIds[index++]
+      const row = sharedVars.allPacketsHTML[id]
+      if (!row) continue
+      nextRows.push(row)
+    }
+
+    if (index < visibleIds.length) {
+      window.setTimeout(materializeChunk, 0)
+      return
+    }
+
+    const appendedIds = [...visibleAfterFilterSnapshot]
+      .filter((id) => id >= indexedPacketCount)
+      .sort((a, b) => a - b)
+    for (const id of appendedIds) {
+      const row = sharedVars.allPacketsHTML[id]
+      if (!row) continue
+      nextRows.push(row)
+    }
+
+    cancelPendingVisibleRows()
+    sharedVars.visiblePacketsHTML = nextRows
+    visibleAfterFilterSnapshot.clear()
+    filterResultPending = false
+    clusterize.update(nextRows)
+    updatePacketSummary()
+  }
+
+  materializeChunk()
+}
+
+filterWorker.addEventListener('message', (event) => {
+  const message = event.data
+  if (message.revision !== filterRevision) return
+
+  sharedVars.hiddenPacketsAmount = message.hiddenCount
+
+  if (message.type === 'filterResult') {
+    applyFilterResult(message)
+  } else if (message.type === 'appendResult') {
+    if (filterResultPending) {
+      for (const id of message.visibleIds) visibleAfterFilterSnapshot.add(id)
+      updatePacketSummary()
+    } else {
+      queueVisiblePacketIds(message.visibleIds)
+    }
+  }
+})
+
+filterWorker.addEventListener('error', (event) => {
+  console.error('Packet filtering worker failed', event.error || event.message)
+})
 
 // Cleaned up from https://css-tricks.com/indeterminate-checkboxes/
 function toggleCheckbox (box, packetName, direction) {
@@ -83,41 +234,20 @@ function updateFilterBox () {
 }
 
 function updateFiltering () {
-  const inverseFiltering = sharedVars.settings.getSetting('inverseFiltering')
-  const regexFilter = sharedVars.settings.getSetting('regexFilter')
-  let regex
-  if (regexFilter) {
-    try {
-      regex = new RegExp(sharedVars.lastFilter)
-    } catch (err) {
-      // TODO: handle
-      console.error(err)
-      regex = new RegExp("")
-    }
-  }
-  sharedVars.allPacketsHTML.forEach(function (item, index, array) {
-    if (!filteringLogic.packetFilteredByFilterBox(sharedVars.allPackets[index],
-        regexFilter ? regex : sharedVars.lastFilter,
-        sharedVars.hiddenPackets,
-        inverseFiltering,
-        regexFilter,
-        sharedVars)) {
-      // If it's hidden, show it
-      array[index] = [item[0].replace('filter-hidden', 'filter-shown')]
-    } else {
-      // If it's shown, hide it
-      array[index] = [item[0].replace('filter-shown', 'filter-hidden')]
-    }
-  })
-  wrappedClusterizeUpdate(sharedVars.allPacketsHTML)
-  clusterize.refresh()
+  flushFilterPacketQueue()
+  filterRevision++
+  filterResultPending = true
+  visibleAfterFilterSnapshot.clear()
+  cancelPendingVisibleRows()
+  filterWorker.postMessage(filterOptions('filter'))
 }
 
-setInterval(updateFilterBox, 100)
+filterInput.addEventListener('input', updateFilterBox)
 
 const sharedVars = {
   allPackets: [],
   allPacketsHTML: [],
+  visiblePacketsHTML: [],
   proxyCapabilities: {},
   ipcRenderer: window.ipcRenderer,
   packetList: document.getElementById('packetlist'),
@@ -125,10 +255,34 @@ const sharedVars = {
   scripting: undefined,
   lastFilter: '',
   hiddenPacketsAmount: 0,
+  queuePacketForFiltering,
+  resetPacketFiltering: undefined,
   store: window.store
 }
 
 window.sharedVars = sharedVars
+
+function resetPacketFiltering () {
+  filterRevision++
+  filterResultPending = false
+  visibleAfterFilterSnapshot.clear()
+  cancelPendingVisibleRows()
+
+  if (filterPacketFlushTimer !== undefined) {
+    clearTimeout(filterPacketFlushTimer)
+    filterPacketFlushTimer = undefined
+  }
+  pendingFilterPackets = []
+
+  sharedVars.visiblePacketsHTML = []
+  sharedVars.hiddenPacketsAmount = 0
+  filterWorker.postMessage(filterOptions('reset'))
+
+  if (clusterize) clusterize.clear()
+  updatePacketSummary()
+}
+
+sharedVars.resetPacketFiltering = resetPacketFiltering
 
 sharedVars.proxyCapabilities = JSON.parse(sharedVars.ipcRenderer.sendSync('proxyCapabilities', ''))
 
@@ -377,24 +531,6 @@ packetContainer.addEventListener('pointerdown', (event) => {
   window.packetClick(Number(packetElement.dataset.packetId))
 })
 
-// Update every 0.05 seconds
-// TODO: Find a better way without updating on every packet (which causes lag)
-window.setInterval(function () {
-  if (sharedVars.packetsUpdated) {
-    const diff = (sharedVars.packetList.parentElement.scrollHeight - sharedVars.packetList.parentElement.offsetHeight) - sharedVars.packetList.parentElement.scrollTop
-    const wasScrolledToBottom = diff < 3 // If it was scrolled to the bottom or almost scrolled to the bottom
-    wrappedClusterizeUpdate(sharedVars.allPacketsHTML)
-    if (wasScrolledToBottom) {
-      sharedVars.packetList.parentElement.scrollTop = sharedVars.packetList.parentElement.scrollHeight
-      // Also update it later - hacky workaround for scroll bar being "left behind"
-      setTimeout(() => {
-        sharedVars.packetList.parentElement.scrollTop = sharedVars.packetList.parentElement.scrollHeight
-      }, 10)
-    }
-    sharedVars.packetsUpdated = false
-  }
-}, 50)
-
 window.closeDialog = function () { // window. stops standardjs from complaining
   if (window.packetEditor) {
     window.packetEditor.toTextArea()
@@ -562,9 +698,7 @@ window.clearPackets = function () { // window. stops standardjs from complaining
   sharedVars.allPackets = []
   sharedVars.allPacketsHTML = []
   apolloResults.clear()
-  sharedVars.packetsUpdated = true
-  // TODO: Doesn't seem to work? When removing line above it doesn't do anything until the next packet
-  wrappedClusterizeUpdate([])
+  resetPacketFiltering()
   sharedVars.bandwidth.reset()
 }
 
@@ -851,10 +985,10 @@ function removeOrAddSelection (id, add) {
   } else {
     fakeElement.firstChild.classList.remove('selected')
   }
-  sharedVars.allPacketsHTML[id] = [fakeElement.innerHTML]
-
-  wrappedClusterizeUpdate(sharedVars.allPacketsHTML)
-  clusterize.refresh()
+  // Visible rows hold this same one-item array. Mutating it lets Clusterize
+  // refresh only the rendered cluster instead of rebuilding the full list.
+  sharedVars.allPacketsHTML[id][0] = fakeElement.innerHTML
+  clusterize.refresh(true)
 }
 
 window.packetClick = function (id) { // window. stops standardjs from complaining
@@ -1001,8 +1135,8 @@ document.body.addEventListener('contextmenu', (event) => {
   }))
 })
 
-var clusterize = new Clusterize({
-  rows: sharedVars.allPacketsHTML,
+clusterize = new Clusterize({
+  rows: sharedVars.visiblePacketsHTML,
   scrollElem: sharedVars.packetList.parentElement,
   contentElem: sharedVars.packetList,
   no_data_text: ''

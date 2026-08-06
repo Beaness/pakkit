@@ -78,7 +78,7 @@ export function setup (passedSharedVars) {
     window.deselectPacket()
     sharedVars.allPackets = JSON.parse(arg)
     sharedVars.allPacketsHTML = []
-    sharedVars.hiddenPacketsAmount = 0
+    sharedVars.resetPacketFiltering()
     sharedVars.allPackets.forEach((packet, index) => {
       packet.uid = index
       sharedVars.packetDom.addPacketToDOM(packet)

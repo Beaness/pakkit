@@ -1,5 +1,3 @@
-import { packetFilteredByFilterBox } from './filteringLogic.js'
-
 let tree
 let treeElement
 let sharedVars
@@ -42,13 +40,8 @@ function formatTime (ms) {
 }
 
 export function addPacketToDOM (packet) {
-  const hiddenByType = sharedVars.hiddenPackets[packet.direction]?.includes(packet.meta.name)
-  const isHidden = packetFilteredByFilterBox(packet, sharedVars.lastFilter, sharedVars.hiddenPackets,
-    // TODO: cache these?
-    sharedVars.settings.getSetting('inverseFiltering'), sharedVars.settings.getSetting('regexFilter'),
-    sharedVars)
   sharedVars.allPacketsHTML.push([
-    `<li id="packet${packet.uid}" data-packet-id="${packet.uid}" class="packet ${packet.direction} ${isHidden ? 'filter-hidden' : 'filter-shown'} ${packet.packetValid ? '' : 'invalid'}">
+    `<li id="packet${packet.uid}" data-packet-id="${packet.uid}" class="packet ${packet.direction} filter-shown ${packet.packetValid ? '' : 'invalid'}">
         <div class="main-data">
           <span class="id">${escapeHtml(packet.hexIdString)}</span>
           <span class="name">${escapeHtml(packet.meta.name)}</span>
@@ -56,28 +49,12 @@ export function addPacketToDOM (packet) {
         </div>
         <span class="time">${escapeHtml(formatTime(packet.time))}</span>
       </li>`])
-  if (hiddenByType) {
-    sharedVars.hiddenPacketsAmount += 1
-  }
-  if (!isHidden) {
-    sharedVars.packetsUpdated = true
-  }
-  updateHidden()
+
+  sharedVars.queuePacketForFiltering(packet)
 }
 
 function refreshPackets () {
   // TODO: Is this needed?
-}
-
-function updateHidden () {
-  const hiddenPackets = document.getElementById('hiddenPackets')
-  hiddenPackets.textContent = sharedVars.hiddenPacketsAmount + ' hidden packets'
-  hiddenPackets.classList.toggle('visible', sharedVars.hiddenPacketsAmount !== 0)
-  document.getElementById('showAllPacketsButton').hidden = sharedVars.hiddenPacketsAmount === 0
-  const packetCount = document.getElementById('packetCount')
-  const packetTotal = sharedVars.allPackets.length
-  packetCount.textContent = `${packetTotal.toLocaleString()} ${packetTotal === 1 ? 'packet' : 'packets'}`
-  packetCount.setAttribute('aria-label', `${packetTotal} captured packets`)
 }
 
 export function setup (passedSharedVars) {
