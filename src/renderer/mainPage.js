@@ -8,6 +8,7 @@ import * as packetDom from './packetDom.js'
 import * as ipcHandler from './ipcHandler.js'
 import * as settings from './settings.js'
 import * as bandwidth from './bandwidth.js'
+import { formatHexDump } from './hexDump.js'
 
 let currentPacket
 let currentPacketType
@@ -686,7 +687,7 @@ function deselectPacket () {
   sharedVars.packetDom.getTreeElement().firstElementChild.innerHTML = 'No packet selected!'
   document.body.classList.remove('packetSelected')
   document.body.classList.add('noPacketSelected')
-  hexViewer.style.display = 'none'
+  hexViewer.textContent = ''
   apolloButton.hidden = true
   apolloDecodeRequest++
   if (apolloViewerActive) openDataView({ currentTarget: dataButton })
@@ -722,7 +723,6 @@ const dataFind = document.getElementById('data-find')
 const dataFindInput = document.getElementById('data-find-input')
 const dataFindCount = document.getElementById('data-find-count')
 let hexViewerActive = false
-let hexViewerLoaded = false
 let apolloViewerActive = false
 let apolloDecodeRequest = 0
 const apolloResults = new Map()
@@ -735,22 +735,14 @@ if (!sharedVars.proxyCapabilities.rawData) {
 }
 
 function renderCurrentPacketInHexViewer () {
-  if (!hexViewerActive || !hexViewerLoaded || currentPacket === undefined) return
+  if (!hexViewerActive || currentPacket === undefined) return
 
   const packet = sharedVars.allPackets[currentPacket]
-  if (!packet || !packet.raw) return
+  if (!packet) return
 
-  const buf = Uint8Array.from(packet.raw)
-  hexViewer.style.display = 'block'
-  hexViewer.contentWindow.postMessage(buf.buffer, '*', [buf.buffer])
+  hexViewer.textContent = formatHexDump(packet.raw)
+  hexViewer.scrollTo(0, 0)
 }
-
-hexViewer.addEventListener('load', () => {
-  if (!hexViewer.getAttribute('src')) return
-
-  hexViewerLoaded = true
-  renderCurrentPacketInHexViewer()
-})
 
 function openDataView (event) {
   hexViewerActive = false
@@ -763,12 +755,7 @@ function openHexView (event) {
   hexViewerActive = true
   apolloViewerActive = false
   window.openMenu(event, 'hex', '-rightpanel')
-
-  if (!hexViewer.getAttribute('src')) {
-    hexViewer.src = hexViewer.dataset.src
-  } else {
-    renderCurrentPacketInHexViewer()
-  }
+  renderCurrentPacketInHexViewer()
 }
 
 function isApolloPacket (packet) {

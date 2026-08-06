@@ -487,7 +487,17 @@ body.packetSelected .whenNoPacketSelected {
 
 #hex-viewer {
   border: 0;
+  color: var(--text);
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
   height: 100%;
+  line-height: 1.65;
+  margin: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  user-select: text;
+  white-space: pre;
   width: 100%;
 }
 

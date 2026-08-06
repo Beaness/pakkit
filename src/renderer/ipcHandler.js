@@ -1,4 +1,5 @@
 import { clearScriptStatus, handleError, handleScriptError, showNoErrors } from './errorHandler.js'
+import { normalizePacketRaw, rawBytes } from './rawData.js'
 
 let sharedVars
 
@@ -14,12 +15,9 @@ export function setup (passedSharedVars) {
 
   sharedVars.ipcRenderer.on('copyHexData', (event, arg) => {
     const ipcMessage = JSON.parse(arg)
-    let data = ''
-    for (const byte of sharedVars.allPackets[ipcMessage.id].raw) {
-      data += byte.toString(16).padStart(2, '0')
-      data += ' '
-    }
-    data = data.trim().toUpperCase()
+    const data = Array.from(rawBytes(sharedVars.allPackets[ipcMessage.id].raw), byte => {
+      return byte.toString(16).padStart(2, '0')
+    }).join(' ').toUpperCase()
     sharedVars.ipcRenderer.send('copyToClipboard', data)
   })
 
@@ -42,7 +40,7 @@ export function setup (passedSharedVars) {
 
   sharedVars.ipcRenderer.on('packet', (event, arg) => {
     const ipcMessage = JSON.parse(arg)
-    sharedVars.packetDom.addPacket(ipcMessage)
+    sharedVars.packetDom.addPacket(normalizePacketRaw(ipcMessage))
     sharedVars.bandwidth.packetAdded()
   })
 
@@ -76,7 +74,7 @@ export function setup (passedSharedVars) {
 
   sharedVars.ipcRenderer.on('loadLogData', (event, arg) => {
     window.deselectPacket()
-    sharedVars.allPackets = JSON.parse(arg)
+    sharedVars.allPackets = JSON.parse(arg).map(normalizePacketRaw)
     sharedVars.allPacketsHTML = []
     sharedVars.resetPacketFiltering()
     sharedVars.allPackets.forEach((packet, index) => {
