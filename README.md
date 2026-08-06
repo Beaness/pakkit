@@ -5,6 +5,7 @@ An AI maintained version of pakkit for myself
 Original repo can be found at https://github.com/Heath123/pakkit
 
 Features:
+- Modern java support (not 100% working as minecraft-data protocol isn't 100% accurate, will be better in time though)
 - A more intuitive UI in my opinion (AI slop style though)
 - Non laggy search filter (offloaded to worker thread)
 - CTRL + F added to some data views

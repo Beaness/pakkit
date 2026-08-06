@@ -5,6 +5,11 @@ import mc from 'minecraft-protocol'
 import minecraftFolder from 'minecraft-folder-path'
 import minecraftData from 'minecraft-data'
 import bufferEqual from 'buffer-equal'
+import {
+  createStatePacketQueue,
+  installGeneratedPacketBlocker,
+  shouldProxyState
+} from './configuration.mjs'
 
 const states = mc.states
 
@@ -12,6 +17,7 @@ let realClient
 let realServer
 let toClientMappings
 let toServerMappings
+let statePacketMappings
 let storedCallback
 
 let scriptingEnabled = false
@@ -54,7 +60,7 @@ function trackEncodedPacketSizes (protocolClient) {
 function isPortTaken (port, fn) {
   const tester = net.createServer()
     .once('error', function (err) {
-      if (err.code != 'EADDRINUSE') return fn(err)
+      if (err.code !== 'EADDRINUSE') return fn(err)
       fn(null, true)
     })
     .once('listening', function () {
@@ -88,11 +94,28 @@ function configureVersion (version) {
   capabilities.versionId = 'java-node-minecraft-protocol-' + resolvedVersion.split('.').join('-')
   toClientMappings = mcdata.protocol.play.toClient.types.packet[1][0].type[1].mappings
   toServerMappings = mcdata.protocol.play.toServer.types.packet[1][0].type[1].mappings
+  statePacketMappings = {
+    [states.PLAY]: {
+      toClient: toClientMappings,
+      toServer: toServerMappings
+    }
+  }
+
+  if (mcdata.protocol.configuration) {
+    statePacketMappings[states.CONFIGURATION] = {
+      toClient: mcdata.protocol.configuration.toClient.types.packet[1][0].type[1].mappings,
+      toServer: mcdata.protocol.configuration.toServer.types.packet[1][0].type[1].mappings
+    }
+  }
 
   capabilities.clientboundPackets = toClientMappings
   capabilities.serverboundPackets = toServerMappings
 
   return resolvedVersion
+}
+
+function getPacketMappings (state, direction) {
+  return statePacketMappings?.[state]?.[direction] || {}
 }
 
 export function startProxy (host, port, listenPort, version, onlineMode, authConsent, callback, messageCallback, dataFolder,
@@ -147,7 +170,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
         srv = mc.createServer(serverOptions)
         console.log('Proxy started (Java)!')
       } catch (err) {
-        let header = 'Unable to start pakkit'
+        const header = 'Unable to start pakkit'
         let message = err.message
         if (err.message.includes('EADDRINUSE')) {
           message = 'The port ' + listenPort + ' is in use. ' +
@@ -181,8 +204,8 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
         //   console.warn('Consent not given to use launcher_profiles.json - automatic online mode will not work')
         // }
         const clientOptions = {
-          host: host,
-          port: port,
+          host,
+          port,
           username: client.username,
           keepAlive: false,
           version: connectionVersion,
@@ -194,7 +217,25 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
             authCodeCallback(data)
           }
         }
+
+        // The local server and upstream client still own LOGIN. From
+        // CONFIGURATION onward, prevent their built-in plugins from producing
+        // substitute packets so the real packets can pass through unchanged.
+        installGeneratedPacketBlocker(client, states.CONFIGURATION, [
+          'registry_data',
+          'finish_configuration'
+        ])
+
         const targetClient = mc.createClient(clientOptions)
+        installGeneratedPacketBlocker(targetClient, states.CONFIGURATION, [
+          'settings',
+          'select_known_packs',
+          'accept_code_of_conduct',
+          'finish_configuration'
+        ])
+        installGeneratedPacketBlocker(targetClient, states.PLAY, [
+          'configuration_acknowledged'
+        ])
         const getTargetPacketSize = trackEncodedPacketSizes(targetClient)
         targetClient.on('session', function (session) {
           // Login complete - the dialog can be closed
@@ -217,101 +258,141 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           return id
         }
 
+        const validationSerializers = new Map()
+
+        function validatePacket (direction, data, meta, raw) {
+          if (typeof meta.name === 'number') return false
+
+          try {
+            const key = direction + ':' + meta.state
+            let serializer = validationSerializers.get(key)
+            if (!serializer) {
+              serializer = mc.createSerializer({
+                state: meta.state,
+                isServer: direction === 'clientbound',
+                version: connectionVersion
+              })
+              serializer.on('error', () => {})
+              validationSerializers.set(key, serializer)
+            }
+
+            const packetBuff = serializer.createPacketBuffer({ name: meta.name, params: data })
+            if (bufferEqual(raw, packetBuff)) return true
+
+            console.log(direction + ': Error in packet ' + meta.state + '.' + meta.name)
+            console.log('received buffer', raw.toString('hex'))
+            console.log('produced buffer', packetBuff.toString('hex'))
+            console.log('received length', raw.length)
+            console.log('produced length', packetBuff.length)
+          } catch (e) {
+            // Unknown or deliberately malformed packets are still forwarded raw.
+          }
+
+          return false
+        }
+
         function handleServerboundPacket (data, meta, raw, packetValid, sizeInfo) {
-          // console.log('serverbound packet', meta, data)
-          if (targetClient.state === states.PLAY && meta.state === states.PLAY) {
-            const id = getId(meta, toServerMappings)
+          const id = getId(meta, getPacketMappings(meta.state, 'toServer'))
 
-            // Stops standardjs from complaining (no-callback-literal)
-            const direction = 'serverbound'
-            const canUseScripting = true
+          // Configuration traffic must remain transparent. PLAY packets keep
+          // the existing scripting behavior, except state transition packets.
+          const direction = 'serverbound'
+          const canUseScripting = meta.state === states.PLAY && meta.name !== 'configuration_acknowledged'
 
-            // callback(direction, meta, data, id)
-            if (!endedTargetClient) {
-              // When scripting is enabled, the script sends packets
-              if (!scriptingEnabled) {
-                // targetClient.write(meta.name, data)
-                targetClient.writeRaw(raw)
-              }
-              callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
+          if (!endedTargetClient) {
+            if (!scriptingEnabled || !canUseScripting) {
+              targetClient.writeRaw(raw)
             }
+            callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
           }
         }
+
         function handleClientboundPacket (data, meta, raw, packetValid, sizeInfo) {
-          if (meta.state === states.PLAY && client.state === states.PLAY) {
-            const id = getId(meta, toClientMappings)
+          const id = getId(meta, getPacketMappings(meta.state, 'toClient'))
 
-            // Stops standardjs from complaining (no-callback-literal)
-            const direction = 'clientbound'
-            const canUseScripting = true
+          const direction = 'clientbound'
+          const canUseScripting = meta.state === states.PLAY && meta.name !== 'start_configuration'
 
-            // callback(direction, meta, data, id)
-            if (!endedClient) {
-              // When scripting is enabled, the script sends packets
-              if (!scriptingEnabled) {
-                // client.write(meta.name, data)
-                client.writeRaw(raw)
-              }
-              callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
-              if (meta.name === 'set_compression') {
-                client.compressionThreshold = data.threshold
-              } // Set compression
+          if (!endedClient) {
+            if (meta.state === states.PLAY && meta.name === 'start_configuration') {
+              // The server-side Client has no built-in handler for a remote
+              // reconfiguration request because it did not originate that
+              // request itself. Follow the real client's acknowledgements so
+              // its deserializer changes states at the same packet boundaries.
+              client.once('configuration_acknowledged', () => {
+                if (client.state !== states.PLAY) return
+                client.state = states.CONFIGURATION
+                client.once('finish_configuration', () => {
+                  if (client.state === states.CONFIGURATION) client.state = states.PLAY
+                })
+              })
             }
+            if (!scriptingEnabled || !canUseScripting) {
+              client.writeRaw(raw)
+            }
+            callback(direction, meta, data, id, [...raw], canUseScripting, packetValid, sizeInfo)
           }
         }
-        targetClient.on('raw', function (raw, meta) {
-          const sizeInfo = getTargetPacketSize(raw)
-          if (client.state !== states.PLAY || meta.state !== states.PLAY) { return }
 
-          const data = targetClient.deserializer.parsePacketBuffer(raw).data.params
-          let packetValid = false
-          try {
-            const packetBuff = client.serializer.createPacketBuffer({ name: meta.name, params: data })
-            if (!bufferEqual(raw, packetBuff)) {
-              console.log('client<-server: Error in packet ' + meta.state + '.' + meta.name)
-              console.log('received buffer', raw.toString('hex'))
-              console.log('produced buffer', packetBuff.toString('hex'))
-              console.log('received length', raw.length)
-              console.log('produced length', packetBuff.length)
-            } else {
-              packetValid = true
-            }
-          } catch (e) {
-            // TODO: handle?
-          }
-          handleClientboundPacket(data, meta, raw, packetValid, sizeInfo)
-          /* if (client.state === states.PLAY && brokenPackets.indexOf(packetId.value) !=== -1)
-           {
-           console.log(`client<-server: raw packet);
-           console.log(packetData);
-           if (!endedClient)
-           client.writeRaw(buffer);
-           } */
+        function handleQueueOverflow () {
+          const message = 'Too many packets were queued while the client and server were changing protocol states.'
+          messageCallback('Unable to bridge Minecraft protocol states', message)
+          if (!endedClient) client.end(message)
+          if (!endedTargetClient) targetClient.end(message)
+        }
+
+        const routeToServer = createStatePacketQueue(
+          targetClient,
+          states,
+          packet => handleServerboundPacket(
+            packet.data,
+            packet.meta,
+            packet.raw,
+            packet.packetValid,
+            packet.sizeInfo
+          ),
+          handleQueueOverflow
+        )
+        const routeToClient = createStatePacketQueue(
+          client,
+          states,
+          packet => handleClientboundPacket(
+            packet.data,
+            packet.meta,
+            packet.raw,
+            packet.packetValid,
+            packet.sizeInfo
+          ),
+          handleQueueOverflow
+        )
+
+        // packet includes the parsed data and decompressed raw bytes before
+        // minecraft-protocol's named event handlers advance the state. That is
+        // essential for forwarding Finish Configuration in the correct codec.
+        targetClient.on('packet', function (data, meta, raw) {
+          const sizeInfo = getTargetPacketSize(raw)
+          if (!shouldProxyState(meta.state)) return
+
+          routeToClient({
+            data,
+            meta,
+            raw,
+            packetValid: validatePacket('clientbound', data, meta, raw),
+            sizeInfo
+          })
         })
-        client.on('raw', function (raw, meta) {
+
+        client.on('packet', function (data, meta, raw) {
           const sizeInfo = getClientPacketSize(raw)
-          if (meta.state !== states.PLAY || targetClient.state !== states.PLAY) { return }
-          const packetData = client.deserializer.parsePacketBuffer(raw).data.params
-          let packetValid = false
-          try {
-            const packetBuff = targetClient.serializer.createPacketBuffer({ name: meta.name, params: packetData })
-            if (!bufferEqual(raw, packetBuff)) {
-              console.log('client->server: Error in packet ' + meta.state + '.' + meta.name)
-              console.log('received buffer', raw.toString('hex'))
-              console.log('produced buffer', packetBuff.toString('hex'))
-              console.log('received length', raw.length)
-              console.log('produced length', packetBuff.length)
-            } else {
-              packetValid = true
-            }
-          } catch (e) {
-            // TODO: handle?
-          }
-          if (typeof meta.name === 'number') {
-            // Unknown packet ID so packet is invalid
-            packetValid = false
-          }
-          handleServerboundPacket(packetData, meta, raw, packetValid, sizeInfo)
+          if (!shouldProxyState(meta.state)) return
+
+          routeToServer({
+            data,
+            meta,
+            raw,
+            packetValid: validatePacket('serverbound', data, meta, raw),
+            sizeInfo
+          })
         })
         targetClient.on('end', function () {
           endedTargetClient = true
@@ -323,7 +404,7 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           console.log('Connection error by server', '(' + host + ':' + port + ') ', err)
           console.log(err.stack)
           if (authWindowOpen) return
-          let header = 'Unable to connect to server'
+          const header = 'Unable to connect to server'
           let message = err.message
           if (err.message.includes('ECONNREFUSED')) {
             message = 'Unable to connect to the Java server at ' +
@@ -345,7 +426,8 @@ export function writeToClient (meta, data, noCallback) {
     meta = { name: meta }
   }
   realClient.write(meta.name, data)
-  const id = Object.keys(toClientMappings).find(key => toClientMappings[key] === meta.name)
+  const mappings = getPacketMappings(realClient.state, 'toClient')
+  const id = Object.keys(mappings).find(key => mappings[key] === meta.name)
   if (!noCallback) {
     storedCallback('clientbound', meta, data, id) // TODO: indicator for injected packets
   }
@@ -356,7 +438,8 @@ export function writeToServer (meta, data, noCallback) {
     meta = { name: meta }
   }
   realServer.write(meta.name, data)
-  const id = Object.keys(toServerMappings).find(key => toServerMappings[key] === meta.name)
+  const mappings = getPacketMappings(realServer.state, 'toServer')
+  const id = Object.keys(mappings).find(key => mappings[key] === meta.name)
   if (!noCallback) {
     storedCallback('serverbound', meta, data, id)
   }

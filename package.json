@@ -9,7 +9,8 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "echo \"No linting configured\""
+    "lint": "echo \"No linting configured\"",
+    "test": "node --test test/*.test.mjs"
   },
   "author": {
     "name": "Heath Mitchell",
@@ -46,7 +47,7 @@
     "electron-window-state": "^5.0.3",
     "hexy": "^0.4.0",
     "md5-file": "^5.0.0",
-    "minecraft-data": "^3.111.0",
+    "minecraft-data": "^3.112.0",
     "minecraft-folder-path": "^1.2.0",
     "minecraft-protocol": "^1.66.2",
     "node-eval": "^2.0.0",

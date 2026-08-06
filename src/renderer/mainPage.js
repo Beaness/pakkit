@@ -9,6 +9,7 @@ import * as ipcHandler from './ipcHandler.js'
 import * as settings from './settings.js'
 import * as bandwidth from './bandwidth.js'
 import { formatHexDump } from './hexDump.js'
+import { appendVisiblePacketRows } from './visiblePacketRows.mjs'
 
 let currentPacket
 let currentPacketType
@@ -103,10 +104,11 @@ function flushVisiblePacketRows () {
   const rows = pendingVisiblePacketRows
   pendingVisiblePacketRows = []
 
-  // Avoid spread here: a loaded log can contain more arguments than the JS
-  // engine accepts in a single function call.
-  for (const row of rows) sharedVars.visiblePacketsHTML.push(row)
-  clusterize.append(rows)
+  appendVisiblePacketRows(
+    sharedVars.visiblePacketsHTML,
+    rows,
+    newRows => clusterize.append(newRows)
+  )
   updatePacketSummary()
 
   if (wasScrolledToBottom) keepPacketListAtBottom()
