@@ -1,11 +1,12 @@
 import _eval from 'node-eval'
+import { replaceSessionIpcListeners } from './ipcSessionHandlers.mjs'
 
 let mainWindow
-let ipcMain
 let proxy
 let scriptingEnabled = false
 let currentScript
 let currentScriptModule
+let disposeIpcListeners
 
 const server = {
   sendPacket: function (meta, data) {
@@ -29,42 +30,61 @@ function reportScriptError (err) {
   console.error(err)
 }
 
+function handleInjectPacket (event, arg) {
+  if (!proxy) return
+  const ipcMessage = JSON.parse(arg)
+  if (ipcMessage.direction === 'clientbound') {
+    proxy.writeToClient(ipcMessage.meta, ipcMessage.data, false)
+  } else {
+    proxy.writeToServer(ipcMessage.meta, ipcMessage.data, false)
+  }
+}
+
+function handleScriptStateChange (event, arg) {
+  if (!proxy || !mainWindow) return
+  const ipcMessage = JSON.parse(arg)
+  scriptingEnabled = ipcMessage.scriptingEnabled
+  proxy.setScriptingEnabled(scriptingEnabled)
+  currentScript = ipcMessage.script
+  // Prevent the script from being executed when scripting is disabled.
+  if (scriptingEnabled) {
+    try {
+      const evaluatedScriptModule = _eval(currentScript, '/script.js')
+      currentScriptModule = evaluatedScriptModule
+      mainWindow.send('scriptStatus', JSON.stringify({ status: 'success' }))
+    } catch (err) {
+      reportScriptError(err)
+    }
+  } else {
+    currentScriptModule = _eval('', '/script.js')
+    mainWindow.send('scriptStatus', JSON.stringify({ status: 'idle' }))
+  }
+}
+
 export function init (window, passedIpcMain, passedProxy) {
+  dispose()
   mainWindow = window
-  ipcMain = passedIpcMain
   proxy = passedProxy
 
-  ipcMain.on('injectPacket', (event, arg) => {
-    const ipcMessage = JSON.parse(arg)
-    if (ipcMessage.direction === 'clientbound') {
-      passedProxy.writeToClient(ipcMessage.meta, ipcMessage.data, false)
-    } else {
-      passedProxy.writeToServer(ipcMessage.meta, ipcMessage.data, false)
-    }
-  })
-
-  ipcMain.on('scriptStateChange', (event, arg) => {
-    const ipcMessage = JSON.parse(arg)
-    scriptingEnabled = ipcMessage.scriptingEnabled
-    proxy.setScriptingEnabled(scriptingEnabled)
-    currentScript = ipcMessage.script
-    // prevent that the script gets executed when scripting is disabled
-    if (scriptingEnabled) {
-      try {
-        const evaluatedScriptModule = _eval(currentScript, '/script.js')
-        currentScriptModule = evaluatedScriptModule
-        mainWindow.send('scriptStatus', JSON.stringify({ status: 'success' }))
-      } catch (err) {
-        reportScriptError(err)
-      }
-    } else {
-      currentScriptModule = _eval('', '/script.js')
-      mainWindow.send('scriptStatus', JSON.stringify({ status: 'idle' }))
-    }
+  disposeIpcListeners = replaceSessionIpcListeners(disposeIpcListeners, passedIpcMain, {
+    injectPacket: handleInjectPacket,
+    scriptStateChange: handleScriptStateChange
   })
 }
 
+export function dispose () {
+  disposeIpcListeners?.()
+
+  mainWindow = undefined
+  proxy = undefined
+  scriptingEnabled = false
+  currentScript = undefined
+  currentScriptModule = undefined
+  disposeIpcListeners = undefined
+}
+
 export function packetHandler (direction, meta, data, id, raw, canUseScripting, packetValid, sizeInfo, deserializationError) {
+  if (!mainWindow || !proxy) return
   try {
     const byteSize = raw?.length ?? 0
     const compressedByteSize = sizeInfo?.compressedByteSize ?? byteSize
@@ -88,5 +108,6 @@ export function packetHandler (direction, meta, data, id, raw, canUseScripting, 
 }
 
 export function messageHandler (header, info, fatal) {
+  if (!mainWindow) return
   mainWindow.send('message', JSON.stringify({ header: header, info: info, fatal: fatal }))
 }

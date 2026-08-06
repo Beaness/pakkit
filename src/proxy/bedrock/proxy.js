@@ -1,31 +1,20 @@
 import { spawn } from 'node:child_process'
-import WebSocket from 'ws'
+import { randomBytes } from 'node:crypto'
 import net from 'node:net'
-
-// const java = require('java')
-
-/* java.asyncOptions = {
-  asyncSuffix: undefined,
-  syncSuffix: "",
-  promiseSuffix: "Promise",
-  promisify: require('util').promisify
-} */
+import path from 'node:path'
+import WebSocket from 'ws'
 
 let child
-
-// TODO: Can it still be frozen?
-// let mayBeFrozen = false
-// let timeFrozen
-
-let proxyPass
-let proxyPlayerSession
-
-let wsPort
 let ws
-
-let scriptingEnabled = false
-
-// This whole thing is messy for now.
+let wsPort
+let wsToken
+let restartTimer
+let websocketRetryTimer
+let stdoutBuffer = ''
+let recentErrorOutput = ''
+let stopped = false
+let restartRequested = false
+let failureReported = false
 
 export const capabilities = {
   modifyPackets: true,
@@ -34,6 +23,8 @@ export const capabilities = {
   scriptingSupport: false,
   clientboundPackets: {},
   serverboundPackets: {},
+  minecraftVersion: undefined,
+  protocolVersion: undefined,
   versionId: 'bedrock-proxypass-json'
 }
 
@@ -45,142 +36,234 @@ let messageCallback
 let dataFolder
 let updateFilteringCallback
 
-// https://stackoverflow.com/questions/28050171/nodejs-random-free-tcp-ports
 function freePort () {
   return new Promise((resolve, reject) => {
-    const srv = net.createServer(function (sock) {
-      sock.end()
-    })
-    srv.listen(0, function () {
-      const port = srv.address().port
-      srv.close()
-      resolve(port)
-    })
-    srv.on('error', (err) => {
-      reject(err)
+    const server = net.createServer(socket => socket.end())
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port
+      server.close(error => error ? reject(error) : resolve(port))
     })
   })
+}
+
+function reportFailure (header, info) {
+  if (failureReported || stopped) return
+  failureReported = true
+  messageCallback(header, info, true)
 }
 
 async function launch () {
-  wsPort = Number(await freePort())
+  if (stopped) return
 
-  child = spawn('java', ['-jar', dataFolder + '/proxypass/' + 'proxypass-pakkit.jar', '--start-from-args', '0.0.0.0',
-    listenPort.toString(), host, port.toString(), '1', 'true', 'true', 'pakkit', 'pakkitProxyPoweredByProxyPass',
-    'true', wsPort.toString()])
+  wsPort = Number(await freePort())
+  wsToken = randomBytes(24).toString('hex')
+  stdoutBuffer = ''
+  recentErrorOutput = ''
+  restartRequested = false
+  failureReported = false
+
+  const jarPath = path.join(dataFolder, 'proxypass', 'proxypass-pakkit.jar')
+  const args = [
+    '-jar', jarPath, '--start-from-args', '0.0.0.0', listenPort.toString(), host, port.toString(),
+    '1', 'true', 'true', 'pakkit', 'pakkitProxyPoweredByProxyPass', 'true', wsPort.toString(), wsToken
+  ]
+
+  child = spawn('java', args, {
+    cwd: path.dirname(jarPath),
+    windowsHide: true
+  })
 
   child.stdout.on('data', handleOutput)
   child.stderr.on('data', handleError)
-  child.on('close', (code, signal) => {
-    setTimeout(() => {
-      launch()
-    }, 50)
+  child.once('error', error => {
+    const missingJava = error.code === 'ENOENT'
+    reportFailure(
+      missingJava ? 'Java 17 or newer is required' : 'Unable to start ProxyPass',
+      missingJava
+        ? 'Install a Java 17+ runtime and make sure the java command is available on PATH.'
+        : error.message
+    )
   })
+  child.once('close', (code, signal) => {
+    child = undefined
+    closeWebsocket()
+    if (stopped) return
 
-  // setTimeout(startWebsocket, 3000)
+    if (restartRequested) {
+      restartTimer = setTimeout(() => {
+        launch().catch(error => reportFailure('Unable to restart ProxyPass', error.message))
+      }, 100)
+      return
+    }
+
+    const javaVersionError = recentErrorOutput.includes('UnsupportedClassVersionError')
+    reportFailure(
+      javaVersionError ? 'Java 17 or newer is required' : 'ProxyPass stopped unexpectedly',
+      javaVersionError
+        ? 'The upgraded Bedrock proxy requires Java 17 or newer. Update Java and restart pakkit.'
+        : `ProxyPass exited with ${signal ? `signal ${signal}` : `code ${code}`}.${recentErrorOutput ? `\n\n${recentErrorOutput}` : ''}`
+    )
+  })
+}
+
+function scheduleWebsocketRetry () {
+  if (stopped || !child || websocketRetryTimer) return
+  websocketRetryTimer = setTimeout(() => {
+    websocketRetryTimer = undefined
+    startWebsocket()
+  }, 150)
 }
 
 function startWebsocket () {
-  ws = new WebSocket('ws://localhost:' + wsPort)
+  if (stopped || !child) return
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
-  /* ws.on('open', function open() {
-    ws.send('something')
-  }); */
+  const candidate = new WebSocket(`ws://127.0.0.1:${wsPort}/${wsToken}`)
+  ws = candidate
 
-  ws.on('message', function incoming (data) {
-    // console.log(data);
-    try {
-      data = JSON.parse(data)
-    } catch (err) {
-      console.error(err)
-      return
-    }
-    switch (data.type) {
-      case 'packet':
-        handlePacket(data.data)
-        break
-      case 'event':
-        handleEvent(data)
-        break
-      default:
-        console.log('Unknown message type', data.type)
+  candidate.on('open', () => {
+    console.log('Proxy started (Bedrock)!')
+  })
+  candidate.on('message', incoming)
+  candidate.on('error', error => {
+    if (ws === candidate) ws = undefined
+    if (!stopped && child) {
+      console.debug('ProxyPass WebSocket is not ready yet:', error.message)
+      scheduleWebsocketRetry()
     }
   })
+  candidate.on('close', () => {
+    if (ws === candidate) ws = undefined
+  })
+}
 
-  console.log('Proxy started (Bedrock)!')
+function incoming (message) {
+  let parsed
+  try {
+    parsed = JSON.parse(message.toString())
+  } catch (error) {
+    console.error('Invalid ProxyPass bridge message:', error)
+    return
+  }
+
+  switch (parsed.type) {
+    case 'packet':
+      handlePacket(parsed.data)
+      break
+    case 'event':
+      handleEvent(parsed)
+      break
+    default:
+      console.log('Unknown ProxyPass message type', parsed.type)
+  }
+}
+
+function normaliseRawBytes (packet) {
+  let raw
+  if (Array.isArray(packet.bytes)) {
+    raw = packet.bytes.slice()
+  } else if (typeof packet.bytes === 'string') {
+    raw = Array.from(Buffer.from(packet.bytes, 'base64'))
+  } else {
+    raw = Object.values(packet.bytes ?? {})
+  }
+
+  // Bridge v1 sent only the payload, with the packet ID separately. Bridge v2
+  // sends the complete variable-length Bedrock packet header and payload.
+  if (!packet.includesHeader) raw.unshift(packet.packetId)
+  return raw
 }
 
 function handlePacket (packet) {
   const name = packet.packetType.toLowerCase()
+  let data
+  try {
+    data = JSON.parse(packet.jsonData)
+  } catch (error) {
+    data = { serializationError: error.message, packet: packet.jsonData }
+  }
 
-  const data = JSON.parse(packet.jsonData)
   const hexIdString = '0x' + packet.packetId.toString(16).padStart(2, '0')
 
-  // These values are unneeded or are exposed elsewhere in the GUI
+  // These values are unneeded or are exposed elsewhere in the GUI.
   delete data.packetId
   delete data.packetType
   delete data.clientId
   delete data.senderId
 
-  const raw = Object.values(packet.bytes)
-  // Prepend packet ID for consistency with Java Edition
-  raw.unshift(packet.packetId)
-
-  // If the packet as already handled bya  custom handler then scripting cannot modify it
-  // (well it can but that would be annoying to add)
-  const canUseScripting = !data.isHandled
-
-  // TODO: check validity
-  packetCallback(packet.direction, { name: name, className: packet.className }, data, hexIdString, raw, canUseScripting, true)
+  packetCallback(
+    packet.direction,
+    { name, className: packet.className },
+    data,
+    hexIdString,
+    normaliseRawBytes(packet),
+    !packet.isHandled,
+    true
+  )
 }
 
 function handleEvent (event) {
   switch (event.eventType) {
     case 'unableToConnect':
-      messageCallback('Unable to connect to server', 'Unable to connect to the Bedrock server at ' +
-        event.eventData.replace(/^\//, '') + // Remove slash at start
-        '. Make sure the server is online.')
+      messageCallback(
+        'Unable to connect to server',
+        `Unable to connect to the Bedrock server at ${event.eventData.replace(/^\//, '')}. Make sure the server is online.`
+      )
       relaunch()
       break
     case 'disconnect':
-      console.log('Disconnect - relaunching proxy')
+      console.log('Bedrock connection closed - relaunching ProxyPass')
       relaunch()
       break
-    case 'filteringPackets':
-      console.log('rec')
+    case 'filteringPackets': {
       const packetTypes = JSON.parse(event.eventData)
-      for (const index in packetTypes) {
-        const idString = '0x' + Number(index).toString(16).padStart(2, '0')
-        const name = packetTypes[index].toLowerCase()
-        // There isn't much of a distinction between serverbound and clientbound in Bedrock and many packets can be sent both ways
+      capabilities.clientboundPackets = {}
+      capabilities.serverboundPackets = {}
+      for (const [id, packetType] of Object.entries(packetTypes)) {
+        const idString = '0x' + Number(id).toString(16).padStart(2, '0')
+        const name = packetType.toLowerCase()
         capabilities.clientboundPackets[idString] = name
         capabilities.serverboundPackets[idString] = name
       }
       updateFilteringCallback()
       break
+    }
+    case 'proxyInfo': {
+      const info = JSON.parse(event.eventData)
+      capabilities.minecraftVersion = info.minecraftVersion
+      capabilities.protocolVersion = info.protocolVersion
+      capabilities.versionId = `bedrock-proxypass-json-${info.minecraftVersion.replaceAll('.', '-')}`
+      console.log(`ProxyPass supports Bedrock ${info.minecraftVersion} (protocol ${info.protocolVersion})`)
+      break
+    }
+    case 'injectionError':
+      messageCallback('Unable to inject Bedrock packet', event.eventData)
+      break
     default:
-      console.log('Unknown event', event.eventType)
+      console.log('Unknown ProxyPass event', event.eventType)
   }
 }
 
 function handleOutput (chunk) {
-  try {
-    const text = chunk.toString('utf8').trim()
+  stdoutBuffer += chunk.toString('utf8')
+  const lines = stdoutBuffer.split(/\r?\n/)
+  stdoutBuffer = lines.pop()
+  for (const line of lines) {
+    const text = line.trim()
+    if (!text) continue
     console.log('ProxyPass output:', text)
-    if (text.startsWith('ProxyPass - Websocket started on port: ') && !(ws && ws.readyState === WebSocket.OPEN)) {
-      setTimeout(startWebsocket, 100)
+    if (text.startsWith('ProxyPass - Websocket started on port: ')) {
+      startWebsocket()
     }
-  } catch (err) {
-    console.error(err)
   }
 }
 
 function handleError (chunk) {
-  try {
-    console.log('ProxyPass error:', chunk.toString('utf8').trim())
-  } catch (err) {
-    console.error(err)
-  }
+  const text = chunk.toString('utf8').trim()
+  if (!text) return
+  recentErrorOutput = (recentErrorOutput + '\n' + text).trim().slice(-4000)
+  console.log('ProxyPass error:', text)
 }
 
 export function startProxy (passedHost, passedPort, passedListenPort, version, onlineMode, authConsent, passedPacketCallback,
@@ -192,43 +275,60 @@ export function startProxy (passedHost, passedPort, passedListenPort, version, o
   messageCallback = passedMessageCallback
   dataFolder = passedDataFolder
   updateFilteringCallback = passedUpdateFilteringCallback
+  stopped = false
 
-  launch()
+  launch().catch(error => reportFailure('Unable to start ProxyPass', error.message))
+}
+
+function closeWebsocket () {
+  if (websocketRetryTimer) clearTimeout(websocketRetryTimer)
+  websocketRetryTimer = undefined
+  if (ws) {
+    ws.removeAllListeners()
+    ws.close()
+    ws = undefined
+  }
 }
 
 export function end () {
-  child.kill()
+  stopped = true
+  restartRequested = false
+  if (restartTimer) clearTimeout(restartTimer)
+  restartTimer = undefined
+  closeWebsocket()
+  if (child && !child.killed) child.kill()
+  child = undefined
 }
 
-// used to relaunch on disconnect
 function relaunch () {
-  ws.close()
-  // Will auto-restart
-  child.kill()
+  if (stopped || restartRequested) return
+  restartRequested = true
+  closeWebsocket()
+  if (child && !child.killed) {
+    child.kill()
+  } else {
+    restartTimer = setTimeout(() => {
+      launch().catch(error => reportFailure('Unable to restart ProxyPass', error.message))
+    }, 100)
+  }
+}
+
+function sendInjection (className, direction, data) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    messageCallback('Unable to inject Bedrock packet', 'ProxyPass is not connected to pakkit.')
+    return
+  }
+  ws.send(JSON.stringify({ type: 'inject', className, direction, data }))
 }
 
 export function writeToClient (meta, data) {
-  ws.send(JSON.stringify({
-    type: 'inject',
-    className: meta.className,
-    direction: 'client',
-    data: data
-  }))
-  // proxyPlayerSession.injectPacketStaticPromise(JSON.stringify(data), meta.className, 'client')
+  sendInjection(meta.className, 'client', data)
 }
 
 export function writeToServer (meta, data) {
-  // proxyPlayerSession.injectPacketStaticPromise(JSON.stringify(data), meta.className, 'server')
-  ws.send(JSON.stringify({
-    type: 'inject',
-    className: meta.className,
-    direction: 'server',
-    data: data
-  }))
+  sendInjection(meta.className, 'server', data)
 }
 
-// TODO
-/* imports.setScriptingEnabled = function (isEnabled) {
-  scriptingEnabled = isEnabled
-  proxyPlayerSession.setDontSendPacketsPromise(scriptingEnabled)
-} */
+export function setScriptingEnabled () {
+  // ProxyPass packet scripting remains disabled; edit-and-resend uses injection.
+}

@@ -13,7 +13,6 @@ export default defineConfig({
       external: [
         'minecraft-protocol',
         'minecraft-data',
-        'bedrock-protocol',
         'adm-zip',
         'protobufjs'
       ]

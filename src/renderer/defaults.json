@@ -1,5 +1,5 @@
 {
-  "^bedrock-proxypass-json$": {
+  "^bedrock-proxypass-json(?:-.*)?$": {
     "hiddenPackets": {
       "serverbound": ["move_player", "player_action", "level_sound_event"],
       "clientbound": ["level_chunk", "update_block", "network_chunk_publisher_update", "set_entity_motion", "move_entity_absolute", "set_entity_data", "level_sound_event"]

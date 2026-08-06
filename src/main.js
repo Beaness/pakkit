@@ -14,6 +14,7 @@ import * as packetHandler from './packetHandler.js'
 import * as setupDataFolder from './setupDataFolder.js'
 import { resolveServerAddress } from './resolveAddress.js'
 import { ApolloDecoder } from './apolloDecoder.js'
+import { stopSessionAndLoadStart } from './sessionLifecycle.mjs'
 
 program
   .option('-a, --autostart', 'Automatically starts the program without the start window (all below options must be set)')
@@ -55,12 +56,36 @@ const dataFolder = setupDataFolder.setup(osDataFolder, sourceDataJar)
 const apolloDecoder = new ApolloDecoder(dataFolder)
 
 let currentScriptFile = null
+let returningToStart = false
+let mainWindowState
 
 function loadRendererPage (win, page) {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    win.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}/${page}`)
+    return win.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}/${page}`)
   } else {
-    win.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/${page}`))
+    return win.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/${page}`))
+  }
+}
+
+async function returnToStart () {
+  if (returningToStart) return
+
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win || win.isDestroyed()) return
+
+  returningToStart = true
+  const activeProxy = proxy
+  proxy = undefined
+
+  try {
+    const stopError = await stopSessionAndLoadStart({
+      activeProxy,
+      disposePacketHandlers: packetHandler.dispose,
+      loadStartPage: () => loadRendererPage(win, 'startPage.html')
+    })
+    if (stopError) console.error('Failed to stop proxy cleanly:', stopError)
+  } finally {
+    returningToStart = false
   }
 }
 
@@ -267,10 +292,13 @@ async function startProxy (args) {
   loadRendererPage(win, 'mainPage.html')
 
   // Load the previous state with fallback to defaults
-  const mainWindowState = windowStateKeeper({
-    defaultWidth: 1000,
-    defaultHeight: 800
-  })
+  if (!mainWindowState) {
+    mainWindowState = windowStateKeeper({
+      defaultWidth: 1000,
+      defaultHeight: 800
+    })
+    mainWindowState.manage(win)
+  }
 
   win.setResizable(true)
   // electron-window-state doesn't provide x/y defaults on first run
@@ -278,7 +306,6 @@ async function startProxy (args) {
   win.setPosition(mainWindowState.x ?? 0, mainWindowState.y ?? 0)
   win.setSize(mainWindowState.width ?? 1000, mainWindowState.height ?? 800)
 
-  mainWindowState.manage(win)
 }
 
 ipcMain.on('proxyCapabilities', (event, arg) => {
@@ -302,6 +329,10 @@ ipcMain.on('contextMenu', (event, arg) => {
 ipcMain.on('relaunchApp', (event, arg) => {
   app.relaunch()
   app.exit()
+})
+
+ipcMain.on('returnToStart', () => {
+  returnToStart().catch(error => console.error('Unable to return to connection setup:', error))
 })
 
 // Store proxy: the renderer reads/writes persistent settings via IPC so that
