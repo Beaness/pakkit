@@ -1,7 +1,7 @@
 /* global Split, jsonTree, escapeHtml, alert, CodeMirror */
 
 import Clusterize from 'clusterize.js'
-import './errorHandler.js'
+import { syncStatusVisibility } from './errorHandler.js'
 import defaultsJson from './defaults.json'
 import * as scripting from './scripting.js'
 import * as packetDom from './packetDom.js'
@@ -1094,6 +1094,7 @@ window.openMenu = function (evt, MenuName, id) { // window. stops standardjs fro
   if (id === '-topmenu') {
     document.querySelector('.container').inert = MenuName !== 'Packets'
     if (MenuName === 'Bandwidth') sharedVars.bandwidth.viewOpened()
+    syncStatusVisibility()
   }
 }
 
