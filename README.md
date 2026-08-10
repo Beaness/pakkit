@@ -6,7 +6,6 @@ Original repo can be found at https://github.com/Heath123/pakkit
 
 Features:
 - Modern java support (not 100% working as minecraft-data protocol isn't 100% accurate, will be better in time though)
-- Bedrock 1.26.40 / protocol 2168 support through an upgraded CloudburstMC ProxyPass bridge (requires Java 17+)
 - A more intuitive UI in my opinion (AI slop style though)
 - Non laggy search filter (offloaded to worker thread)
 - CTRL + F added to some data views

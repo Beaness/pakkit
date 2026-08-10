@@ -4,13 +4,10 @@ const store = window.store
 let isLoading = false
 let connectAddress
 let listenPort
-let platform
 let version
 let onlineMode
 
-const platformSelect = document.getElementById('platform')
 const javaVersionSelect = document.getElementById('version')
-const bedrockVersionSelect = document.getElementById('version-bedrock')
 const listenPortInput = document.getElementById('listen-port')
 const listenPortPreview = document.getElementById('listen-port-preview')
 
@@ -19,80 +16,43 @@ function getSetting (name, defaultValue) {
   return store.get(name)
 }
 
-function versionSelect (edition) {
-  return edition === 'bedrock' ? bedrockVersionSelect : javaVersionSelect
-}
-
-function defaultVersion (edition) {
-  return edition === 'bedrock' ? '1.26.40' : 'auto'
-}
-
 function updateListenPortPreview () {
-  const fallbackPort = platformSelect.value === 'bedrock' ? '19142' : '25566'
-  listenPortPreview.textContent = listenPortInput.value || fallbackPort
+  listenPortPreview.textContent = listenPortInput.value || '25566'
 }
 
-function readForm (edition) {
+function readForm () {
   connectAddress = document.getElementById('connect-address').value
   listenPort = listenPortInput.value
-  platform = edition
-  version = versionSelect(edition).value
+  version = javaVersionSelect.value
   onlineMode = document.getElementById('auth-online').checked
 }
 
-function loadSettings (edition) {
-  const fallbackVersion = defaultVersion(edition)
-  const storedVersion = getSetting(edition + 'LastVersion', fallbackVersion)
-  const select = versionSelect(edition)
+function loadSettings () {
+  const fallbackVersion = 'auto'
+  const storedVersion = getSetting('javaLastVersion', fallbackVersion)
+  const select = javaVersionSelect
   const supported = Array.from(select.options).some(option => option.value === storedVersion)
   version = supported ? storedVersion : fallbackVersion
-  if (!supported) store.set(edition + 'LastVersion', version)
+  if (!supported) store.set('javaLastVersion', version)
   select.value = version
 
-  connectAddress = getSetting(edition + 'LastConnectAddress', 'localhost')
-  listenPort = getSetting(edition + 'LastListenPort', edition === 'java' ? '25566' : '19142')
-  onlineMode = getSetting(edition + 'LastOnlineMode', true)
+  connectAddress = getSetting('javaLastConnectAddress', 'localhost')
+  listenPort = getSetting('javaLastListenPort', '25566')
+  onlineMode = getSetting('javaLastOnlineMode', true)
 
   document.getElementById('connect-address').value = connectAddress
   listenPortInput.value = listenPort
   document.getElementById('auth-online').checked = onlineMode
 }
 
-function saveSettings (edition) {
-  store.set('lastPlatform', edition)
-  store.set(edition + 'LastVersion', version)
-  store.set(edition + 'LastConnectAddress', connectAddress)
-  store.set(edition + 'LastListenPort', listenPort)
-  store.set(edition + 'LastOnlineMode', onlineMode)
+function saveSettings () {
+  store.set('javaLastVersion', version)
+  store.set('javaLastConnectAddress', connectAddress)
+  store.set('javaLastListenPort', listenPort)
+  store.set('javaLastOnlineMode', onlineMode)
 }
 
-let lastPlatform = getSetting('lastPlatform', 'java')
-platformSelect.value = lastPlatform
-platform = lastPlatform
-loadSettings(platform)
-
-function platformChange () {
-  const nextPlatform = platformSelect.value
-  if (lastPlatform !== nextPlatform) {
-    readForm(lastPlatform)
-    saveSettings(lastPlatform)
-  }
-
-  platform = nextPlatform
-  if (platform === 'bedrock') {
-    bedrockVersionSelect.style.display = 'block'
-    javaVersionSelect.style.display = 'none'
-    document.getElementById('auth-row').style.display = 'none'
-  } else {
-    javaVersionSelect.style.display = 'block'
-    bedrockVersionSelect.style.display = 'none'
-    document.getElementById('auth-row').style.display = 'flex'
-  }
-
-  if (lastPlatform !== platform) loadSettings(platform)
-  lastPlatform = platform
-  updateListenPortPreview()
-}
+loadSettings()
 
 function startProxy (event) {
   event.preventDefault()
@@ -101,25 +61,23 @@ function startProxy (event) {
   isLoading = true
   document.getElementById('start').disabled = true
   document.getElementById('start-label').textContent = 'Starting proxy…'
-  readForm(platformSelect.value)
-  saveSettings(platform)
+  readForm()
+  saveSettings()
 
   connectAddress = connectAddress || 'localhost'
-  listenPort = listenPort || (platform === 'bedrock' ? '19142' : '25566')
+  listenPort = listenPort || '25566'
   store.set('authConsentGiven', false)
 
   ipcRenderer.send('startProxy', JSON.stringify({
     consent: store.get('authConsentGiven'),
     connectAddress,
     listenPort,
-    platform,
     version,
     onlineMode
   }))
 }
 
 listenPortInput.addEventListener('input', updateListenPortPreview)
-platformChange()
+updateListenPortPreview()
 
 window.startProxy = startProxy
-window.platformChange = platformChange

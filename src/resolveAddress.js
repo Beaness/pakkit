@@ -4,17 +4,14 @@ import dns from 'node:dns'
 //
 // Minecraft parses "host:port" (or just "host") using a URI, then if no custom
 // port was given it queries the _minecraft._tcp.<host> SRV record and uses the
-// host/port from that record instead. Bedrock does not do SRV lookups.
+// host/port from that record instead.
 //
 // See:
 //   net.minecraft.client.multiplayer.resolver.ServerAddress
 //   net.minecraft.client.multiplayer.resolver.AddressResolver
 //   net.minecraft.client.multiplayer.resolver.RedirectResolver
 
-const DEFAULT_PORTS = {
-  java: 25565,
-  bedrock: 19132
-}
+const DEFAULT_PORT = 25565
 
 // Minecraft uses new URI(null, "//" + address, null). We use URL with an http
 // scheme to get the same authority-component parsing (handles IPv6 brackets,
@@ -37,14 +34,12 @@ function isIpAddress (host) {
   return false
 }
 
-export async function resolveServerAddress (addressString, platform) {
-  const defaultPort = DEFAULT_PORTS[platform] ?? DEFAULT_PORTS.java
-
-  const { host, port } = parseAddress(addressString, defaultPort)
+export async function resolveServerAddress (addressString) {
+  const { host, port } = parseAddress(addressString, DEFAULT_PORT)
 
   // Java Edition: SRV lookup only when using the default port (matches
   // RedirectResolver which skips SRV when a custom port is given).
-  if (platform === 'java' && port === 25565 && !isIpAddress(host)) {
+  if (port === DEFAULT_PORT && !isIpAddress(host)) {
     try {
       const records = await dns.promises.resolveSrv(`_minecraft._tcp.${host}`)
       if (records.length > 0) {

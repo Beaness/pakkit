@@ -4,7 +4,7 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 export default {
   packagerConfig: {
     asar: false,
-    extraResource: ['data', 'icons'],
+    extraResource: ['icons'],
     // Keep the Vite build output and the runtime `node_modules` (pruned to
     // production dependencies by Forge) for the protocol libraries that are
     // externalized from the main bundle. Everything else (source, public

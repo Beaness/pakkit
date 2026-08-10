@@ -9,17 +9,14 @@ import unhandled from 'electron-unhandled'
 import squirrelStartup from 'electron-squirrel-startup'
 
 import * as javaProxy from './proxy/java/proxy.js'
-import * as bedrockProxy from './proxy/bedrock/proxy.js'
 import * as packetHandler from './packetHandler.js'
-import * as setupDataFolder from './setupDataFolder.js'
 import { resolveServerAddress } from './resolveAddress.js'
 import { ApolloDecoder } from './apolloDecoder.js'
 import { stopSessionAndLoadStart } from './sessionLifecycle.mjs'
 
 program
   .option('-a, --autostart', 'Automatically starts the program without the start window (all below options must be set)')
-  .option('-e, --platform <platform>', 'Platform (accepted values: java, bedrock)')
-  .option('-v, --version <version>', 'The version to use, or auto to detect it from the Java client (not needed for Bedrock)')
+  .option('-v, --version <version>', 'The version to use, or auto to detect it from the Java client')
   .option('-c, --connect <address>', 'The address of the server to connect to (e.g. localhost, mc.hypixel.net, localhost:25570)')
   .option('-P, --listen-port  <port>', 'The port to listen on')
 
@@ -27,7 +24,7 @@ program.parse(process.argv)
 const options = program.opts()
 
 if (options.autostart) {
-  if (!options.platform || !(options.version || options.platform !== 'java') || !options.connect || !options.listenPort) {
+  if (!options.version || !options.connect || !options.listenPort) {
     console.log('Not all required options were passed.')
     program.help()
   }
@@ -43,16 +40,12 @@ const store = new Store()
 let proxy // Defined later when an option is chosen
 
 // In development the main bundle lives in `.vite/build`, so the project root is
-// two levels up. When packaged with extraResource, assets live in resources/.
+// two levels up. When packaged with extraResource, icons live in resources/.
 const projectRoot = path.resolve(__dirname, '..', '..')
 const isDev = !app.isPackaged
 const iconsDir = isDev ? path.join(projectRoot, 'icons') : path.join(process.resourcesPath, 'icons')
-const sourceDataJar = isDev
-  ? path.join(projectRoot, 'data', 'proxypass-pakkit.jar')
-  : path.join(process.resourcesPath, 'data', 'proxypass-pakkit.jar')
-
-const osDataFolder = app.getPath('appData')
-const dataFolder = setupDataFolder.setup(osDataFolder, sourceDataJar)
+const dataFolder = path.join(app.getPath('appData'), 'pakkit')
+fs.mkdirSync(dataFolder, { recursive: true })
 const apolloDecoder = new ApolloDecoder(dataFolder)
 
 let currentScriptFile = null
@@ -225,7 +218,6 @@ function createWindow () {
       onlineMode: false,
       connectAddress: options.connect,
       listenPort: options.listenPort,
-      platform: options.platform,
       version: options.version
     })
   } else {
@@ -269,18 +261,14 @@ function showAuthCode (data) {
 }
 
 async function startProxy (args) {
-  if (args.platform === 'java') {
-    proxy = javaProxy
-  } else {
-    proxy = bedrockProxy
-  }
+  proxy = javaProxy
 
   const win = BrowserWindow.getAllWindows()[0]
 
   // Resolve the server address the same way the Minecraft client does:
   // parse host:port, then SRV lookup for _minecraft._tcp.<host> when no
   // custom port was given.
-  const { host, port } = await resolveServerAddress(args.connectAddress, args.platform)
+  const { host, port } = await resolveServerAddress(args.connectAddress)
   console.log(`Resolved ${args.connectAddress} -> ${host}:${port}`)
 
   packetHandler.init(BrowserWindow.getAllWindows()[0], ipcMain, proxy)

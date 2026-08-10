@@ -2,7 +2,7 @@
   "name": "pakkit",
   "productName": "pakkit",
   "version": "1.0.0",
-  "description": "A packet monitor for Minecraft Java and Minecraft Bedrock",
+  "description": "A packet monitor for Minecraft Java Edition",
   "main": ".vite/build/main.js",
   "scripts": {
     "start": "electron-forge start",
@@ -46,7 +46,6 @@
     "electron-unhandled": "^4.0.1",
     "electron-window-state": "^5.0.3",
     "hexy": "^0.4.0",
-    "md5-file": "^5.0.0",
     "minecraft-data": "^3.112.0",
     "minecraft-folder-path": "^1.2.0",
     "minecraft-protocol": "^1.66.2",

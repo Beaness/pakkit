@@ -27,18 +27,9 @@
         </div>
 
         <form class="setup-form" onsubmit="startProxy(event)">
-            <div class="field-grid">
-                <label class="field" for="platform">
-                    <span>Edition</span>
-                    <select id="platform" onchange="platformChange()">
-                        <option value="java">Java Edition</option>
-                        <option value="bedrock">Bedrock Edition</option>
-                    </select>
-                </label>
-
-                <label class="field" for="version">
-                    <span>Game version</span>
-                    <select id="version">
+            <label class="field" for="version">
+                <span>Game version</span>
+                <select id="version">
                         <option value="auto">Detect automatically</option>
                         <option value="26.1">26.1</option>
                         <option value="1.21.11">1.21.11</option>
@@ -108,12 +99,8 @@
                         <option value="15w40b">15w40b</option>
                         <option value="1.8.8">1.8.x</option>
                         <option value="1.7.10">1.7.10</option>
-                    </select>
-                    <select disabled id="version-bedrock" style="display: none;">
-                        <option value="1.26.40">1.26.40 (protocol 2168)</option>
-                    </select>
-                </label>
-            </div>
+                </select>
+            </label>
 
             <label class="field" for="connect-address">
                 <span>Server address</span>
