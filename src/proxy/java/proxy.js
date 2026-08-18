@@ -1,9 +1,7 @@
 // Modified from https://github.com/PrismarineJS/node-minecraft-protocol/blob/master/examples/proxy/proxy.js
 
 import net from 'node:net'
-import mc from 'minecraft-protocol'
 import minecraftFolder from 'minecraft-folder-path'
-import minecraftData from 'minecraft-data'
 import bufferEqual from 'buffer-equal'
 import {
   createStatePacketQueue,
@@ -12,7 +10,9 @@ import {
 } from './configuration.mjs'
 import { isPacketParseError, observeRawPackets } from './rawPacketCapture.mjs'
 
-const states = mc.states
+let mc
+let minecraftData
+let states
 
 let realClient
 let realServer
@@ -48,6 +48,12 @@ export const capabilities = {
 }
 
 let authWindowOpen = false
+
+export function initializeDependencies (dependencies) {
+  mc = dependencies.minecraftProtocol
+  minecraftData = dependencies.minecraftData
+  states = mc.states
+}
 
 function configureVersion (version) {
   const mcdata = minecraftData(version)
@@ -87,6 +93,7 @@ function getPacketMappings (state, direction) {
 
 export function startProxy (host, port, listenPort, version, onlineMode, authConsent, callback, messageCallback, dataFolder,
   updateFilteringCallback, authCodeCallback) {
+  if (!mc || !minecraftData) throw new Error('Java proxy dependencies have not been initialized')
   storedCallback = callback
   authConsent = false
   const useClientVersion = version.toLowerCase() === 'auto'

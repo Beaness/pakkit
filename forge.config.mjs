@@ -5,13 +5,14 @@ export default {
   packagerConfig: {
     asar: false,
     extraResource: ['icons'],
-    // Keep the Vite build output and the runtime `node_modules` (pruned to
-    // production dependencies by Forge) for the protocol libraries that are
-    // externalized from the main bundle. Everything else (source, public
-    // assets, configs) is excluded from the packaged app.
+    // Keep the Vite build output and runtime node_modules, but exclude every
+    // copy of minecraft-data. It is installed into the user-data cache during
+    // boot so new Minecraft versions do not require a pakkit release.
     ignore: (file) => {
       if (!file) return false
       if (file.startsWith('/.vite')) return false
+      const normalizedFile = file.replaceAll('\\', '/')
+      if (/(^|\/)node_modules\/minecraft-data(?:\/|$)/.test(normalizedFile)) return true
       if (file.startsWith('/node_modules')) return false
       return true
     }

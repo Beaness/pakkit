@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>Starting pakkit</title>
+    <meta content="script-src 'self';" http-equiv="Content-Security-Policy">
+    <link href="/shared.css" rel="stylesheet" type="text/css">
+    <link href="/loadingPage.css" rel="stylesheet" type="text/css">
+</head>
+<body class="loading-page">
+<main class="loading-card" aria-live="polite">
+    <img alt="" class="app-logo loading-logo" src="./icons/icon.png">
+    <h1>Starting pakkit</h1>
+    <div class="loading-indicator" id="loading-indicator" aria-hidden="true">
+        <span></span><span></span><span></span>
+    </div>
+    <p id="loading-status">Preparing minecraft-data…</p>
+    <div class="loading-actions" id="loading-actions" hidden>
+        <button class="primary-button" id="retry-update" type="button">Retry</button>
+        <button class="button-secondary" id="quit-app" type="button">Quit</button>
+    </div>
+</main>
+<script type="module" src="/src/renderer/loadingPage.js"></script>
+</body>
+</html>
+

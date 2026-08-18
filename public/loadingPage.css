@@ -1,0 +1,85 @@
+body.loading-page {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.loading-card {
+  align-items: center;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  max-width: 360px;
+  padding: 30px 28px 26px;
+  text-align: center;
+  width: 100%;
+}
+
+.loading-logo {
+  height: 48px;
+  margin-bottom: 14px;
+  width: 48px;
+}
+
+.loading-card h1 {
+  font-size: 20px;
+  margin: 0 0 18px;
+}
+
+.loading-card p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 14px 0 0;
+  min-height: 19px;
+}
+
+.loading-indicator {
+  display: flex;
+  gap: 6px;
+  height: 8px;
+}
+
+.loading-indicator span {
+  animation: loading-dot 900ms ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.loading-indicator span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.loading-indicator span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.loading-indicator.failed span {
+  animation: none;
+  background: var(--danger);
+}
+
+.loading-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+@keyframes loading-dot {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-indicator span {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+

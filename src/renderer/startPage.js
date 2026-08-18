@@ -11,6 +11,14 @@ const javaVersionSelect = document.getElementById('version')
 const listenPortInput = document.getElementById('listen-port')
 const listenPortPreview = document.getElementById('listen-port-preview')
 
+const minecraftVersions = JSON.parse(ipcRenderer.sendSync('minecraft-data-versions'))
+for (const minecraftVersion of minecraftVersions) {
+  const option = document.createElement('option')
+  option.value = minecraftVersion
+  option.textContent = minecraftVersion
+  javaVersionSelect.append(option)
+}
+
 function getSetting (name, defaultValue) {
   if (!store.has(name)) store.set(name, defaultValue)
   return store.get(name)

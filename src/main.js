@@ -12,6 +12,8 @@ import * as javaProxy from './proxy/java/proxy.js'
 import * as packetHandler from './packetHandler.js'
 import { resolveServerAddress } from './resolveAddress.js'
 import { ApolloDecoder } from './apolloDecoder.js'
+import { loadMinecraftRuntime } from './minecraftDataRuntime.mjs'
+import { ensureLatestMinecraftData } from './minecraftDataUpdater.mjs'
 import { stopSessionAndLoadStart } from './sessionLifecycle.mjs'
 
 program
@@ -47,16 +49,88 @@ const iconsDir = isDev ? path.join(projectRoot, 'icons') : path.join(process.res
 const dataFolder = path.join(app.getPath('appData'), 'pakkit')
 fs.mkdirSync(dataFolder, { recursive: true })
 const apolloDecoder = new ApolloDecoder(dataFolder)
+const minecraftDataCache = path.join(dataFolder, 'minecraft-data')
 
 let currentScriptFile = null
 let returningToStart = false
 let mainWindowState
+let minecraftData
+let minecraftDataBootPromise
 
 function loadRendererPage (win, page) {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     return win.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}/${page}`)
   } else {
     return win.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/${page}`))
+  }
+}
+
+function sendMinecraftDataStatus (win, status) {
+  if (!win.isDestroyed()) win.send('minecraft-data-status', JSON.stringify(status))
+}
+
+async function prepareMinecraftData (win) {
+  if (minecraftData) return
+  if (minecraftDataBootPromise) return await minecraftDataBootPromise
+
+  minecraftDataBootPromise = (async () => {
+    const installedPackage = await ensureLatestMinecraftData({
+      cacheDirectory: minecraftDataCache,
+      onStatus: status => sendMinecraftDataStatus(win, status)
+    })
+
+    if (installedPackage.warning) {
+      console.warn(
+        `Unable to update minecraft-data; using cached ${installedPackage.version}:`,
+        installedPackage.warning
+      )
+    }
+
+    const runtime = loadMinecraftRuntime(installedPackage.entryPath)
+    minecraftData = runtime.minecraftData
+    javaProxy.initializeDependencies(runtime)
+    sendMinecraftDataStatus(win, {
+      stage: 'ready',
+      message: `minecraft-data ${installedPackage.version} is ready`
+    })
+  })()
+
+  try {
+    await minecraftDataBootPromise
+  } catch (error) {
+    minecraftDataBootPromise = undefined
+    throw error
+  }
+}
+
+async function loadInitialPage (win) {
+  if (options.autostart) {
+    await startProxy({
+      // TODO: make online-mode working in headless via command-line parameters
+      consent: false,
+      onlineMode: false,
+      connectAddress: options.connect,
+      listenPort: options.listenPort,
+      version: options.version
+    })
+  } else {
+    await loadRendererPage(win, 'startPage.html')
+  }
+}
+
+async function bootstrapWindow (win) {
+  await loadRendererPage(win, 'loadingPage.html')
+
+  try {
+    await prepareMinecraftData(win)
+    await loadInitialPage(win)
+  } catch (error) {
+    console.error('Unable to prepare minecraft-data:', error)
+    if (!win.isDestroyed()) {
+      win.send('minecraft-data-update-error', JSON.stringify({
+        message: `Could not download minecraft-data. Check your connection and retry. (${error.message})`
+      }))
+    }
   }
 }
 
@@ -210,19 +284,7 @@ function createWindow () {
   })
 
   win.setMenu(null)
-  // and load the index.html of the app.
-  if (options.autostart) {
-    startProxy({
-      // TODO: make online-mode working in headless via command-line parameters
-      consent: false,
-      onlineMode: false,
-      connectAddress: options.connect,
-      listenPort: options.listenPort,
-      version: options.version
-    })
-  } else {
-    loadRendererPage(win, 'startPage.html')
-  }
+  bootstrapWindow(win).catch(error => console.error('Unable to bootstrap pakkit:', error))
 }
 
 // This method will be called when Electron has finished
@@ -254,6 +316,18 @@ ipcMain.on('startProxy', (event, arg) => {
   const ipcMessage = JSON.parse(arg)
   startProxy(ipcMessage)
 })
+
+ipcMain.on('minecraft-data-versions', event => {
+  const versions = minecraftData?.supportedVersions?.pc || []
+  event.returnValue = JSON.stringify([...versions].reverse())
+})
+
+ipcMain.on('retryMinecraftDataUpdate', event => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) bootstrapWindow(win).catch(error => console.error('Unable to retry minecraft-data update:', error))
+})
+
+ipcMain.on('quitApp', () => app.quit())
 
 function showAuthCode (data) {
   const win = BrowserWindow.getAllWindows()[0]

@@ -9,6 +9,7 @@ export default defineConfig({
     rollupOptions: {
       external: ['electron', 'node:fs', 'node:path', 'node:url', 'node:crypto'],
       input: {
+        loadingPage: 'loadingPage.html',
         startPage: 'startPage.html',
         mainPage: 'mainPage.html',
       },
