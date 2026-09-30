@@ -6,6 +6,7 @@ import test from 'node:test'
 import {
   createStatePacketQueue,
   installGeneratedPacketBlocker,
+  installLoginSessionId,
   shouldProxyState
 } from '../src/proxy/java/configuration.mjs'
 
@@ -96,4 +97,18 @@ test('a reconfiguration acknowledgement can follow an upstream CONFIGURATION tra
   route(acknowledgement)
 
   assert.deepEqual(forwarded, [acknowledgement])
+})
+
+test('login success gets a sessionId when the library omits it', () => {
+  const writes = []
+  const client = { write: (name, params) => writes.push([name, params]) }
+  installLoginSessionId(client)
+
+  client.write('success', { uuid: 'abc', username: 'x', properties: [] })
+  client.write('success', { uuid: 'abc', sessionId: 'custom' })
+  client.write('compress', { threshold: 256 })
+
+  assert.equal(writes[0][1].sessionId, 'abc')
+  assert.equal(writes[1][1].sessionId, 'custom')
+  assert.deepEqual(writes[2][1], { threshold: 256 })
 })
