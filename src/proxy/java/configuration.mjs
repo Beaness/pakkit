@@ -19,6 +19,20 @@ export function installGeneratedPacketBlocker (client, configurationState, packe
   }
 }
 
+// Minecraft 26.2 added a required sessionId to the login success packet, which
+// minecraft-protocol's local server does not fill in yet. The value is only
+// seen by the local client, so any UUID works. Older versions ignore it.
+export function installLoginSessionId (client) {
+  const write = client.write.bind(client)
+
+  client.write = (name, params) => {
+    if (name === 'success' && params && params.sessionId === undefined) {
+      return write(name, { ...params, sessionId: params.uuid })
+    }
+    return write(name, params)
+  }
+}
+
 export function createStatePacketQueue (destination, states, forward, onOverflow, maxPending = 4096) {
   const pending = []
 

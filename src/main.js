@@ -50,6 +50,8 @@ const dataFolder = path.join(app.getPath('appData'), 'pakkit')
 fs.mkdirSync(dataFolder, { recursive: true })
 const apolloDecoder = new ApolloDecoder(dataFolder)
 const minecraftDataCache = path.join(dataFolder, 'minecraft-data')
+// Protocol data for Minecraft versions minecraft-data has not released yet
+const minecraftDataOverlayDir = isDev ? path.join(projectRoot, 'data-overlay') : path.join(process.resourcesPath, 'data-overlay')
 
 let currentScriptFile = null
 let returningToStart = false
@@ -76,6 +78,7 @@ async function prepareMinecraftData (win) {
   minecraftDataBootPromise = (async () => {
     const installedPackage = await ensureLatestMinecraftData({
       cacheDirectory: minecraftDataCache,
+      overlayDirectory: minecraftDataOverlayDir,
       onStatus: status => sendMinecraftDataStatus(win, status)
     })
 

@@ -6,6 +6,7 @@ import bufferEqual from 'buffer-equal'
 import {
   createStatePacketQueue,
   installGeneratedPacketBlocker,
+  installLoginSessionId,
   shouldProxyState
 } from './configuration.mjs'
 import { isPacketParseError, observeRawPackets } from './rawPacketCapture.mjs'
@@ -127,19 +128,20 @@ export function startProxy (host, port, listenPort, version, onlineMode, authCon
           // handshake when the server version is false.
           version: useClientVersion ? false : version
         }
-        if (useClientVersion) {
-          serverOptions.beforeLogin = function (client) {
-            const mcdata = minecraftData(client.protocolVersion)
-            const resolvedVersion = configureVersion(client.protocolVersion)
+        serverOptions.beforeLogin = function (client) {
+          installLoginSessionId(client)
+          if (!useClientVersion) return
 
-            // createServer initially uses its default version for this data;
-            // replace it before configuration starts with the detected
-            // client's version-specific codec.
-            serverOptions.registryCodec = mcdata.registryCodec || mcdata.loginPacket?.dimensionCodec
+          const mcdata = minecraftData(client.protocolVersion)
+          const resolvedVersion = configureVersion(client.protocolVersion)
 
-            console.log('Detected client version', resolvedVersion, '(protocol ' + client.protocolVersion + ')')
-            updateFilteringCallback()
-          }
+          // createServer initially uses its default version for this data;
+          // replace it before configuration starts with the detected
+          // client's version-specific codec.
+          serverOptions.registryCodec = mcdata.registryCodec || mcdata.loginPacket?.dimensionCodec
+
+          console.log('Detected client version', resolvedVersion, '(protocol ' + client.protocolVersion + ')')
+          updateFilteringCallback()
         }
         srv = mc.createServer(serverOptions)
         console.log('Proxy started (Java)!')

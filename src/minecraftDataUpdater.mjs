@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { x as extractTar } from 'tar'
+import { applyMinecraftDataOverlay } from './minecraftDataOverlay.mjs'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/minecraft-data/latest'
 const MAX_PACKAGE_BYTES = 100 * 1024 * 1024
@@ -211,9 +212,9 @@ async function installPackage (cacheDirectory, metadata, fetchImpl, onStatus) {
   return installedPackage
 }
 
-export async function ensureLatestMinecraftData ({
+async function resolveLatestMinecraftData ({
   cacheDirectory,
-  fetchImpl = globalThis.fetch,
+  fetchImpl,
   onStatus
 }) {
   if (typeof fetchImpl !== 'function') throw new Error('This runtime does not provide the Fetch API')
@@ -247,4 +248,18 @@ export async function ensureLatestMinecraftData ({
 
   await writeCurrentMarker(cacheDirectory, installedPackage.version)
   return { ...installedPackage, updated: true }
+}
+
+export async function ensureLatestMinecraftData ({
+  cacheDirectory,
+  fetchImpl = globalThis.fetch,
+  overlayDirectory,
+  onStatus
+}) {
+  const resolvedPackage = await resolveLatestMinecraftData({ cacheDirectory, fetchImpl, onStatus })
+  if (overlayDirectory) {
+    // Also covers cached packages that were installed before the overlay existed.
+    await applyMinecraftDataOverlay(resolvedPackage.packageDirectory, overlayDirectory)
+  }
+  return resolvedPackage
 }

@@ -4,7 +4,7 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 export default {
   packagerConfig: {
     asar: false,
-    extraResource: ['icons'],
+    extraResource: ['icons', 'data-overlay'],
     // Keep the Vite build output and runtime node_modules, but exclude every
     // copy of minecraft-data. It is installed into the user-data cache during
     // boot so new Minecraft versions do not require a pakkit release.
